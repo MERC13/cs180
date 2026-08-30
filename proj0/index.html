@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project 0 — Becoming Friends with Your Camera</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="site-name" href="../index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="../index.html">&larr; Portfolio</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">Project 0</span>
+    <h1>Becoming Friends with Your Camera</h1>
+    <p class="intro">
+      Three small experiments in perspective, focal length, and the center of
+      projection — a distorted selfie fixed by stepping back, a building that
+      compresses or looms depending on how you shoot it, and a Hitchcock
+      &ldquo;Vertigo&rdquo; dolly zoom built from eight stills.
+    </p>
+    <div class="meta">
+      <span class="eyebrow">CS 180 &middot; Fall 2026</span>
+      <span class="eyebrow">Due Sept 1, 2026</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <a href="#part1">Part 1 &mdash; Selfie</a>
+    <a href="#part2">Part 2 &mdash; Architecture</a>
+    <a href="#part3">Part 3 &mdash; Dolly Zoom</a>
+  </nav>
+
+  <section class="section" id="part1">
+    <span class="eyebrow">Part 1</span>
+    <h2>The Wrong Way vs. the Right Way</h2>
+    <p class="section-intro">
+      A selfie taken from close range versus one taken by stepping back
+      several feet and zooming in to match the framing.
+    </p>
+
+    <div class="compare">
+      <figure>
+        <img src="media/zoomed_in_face.webp" alt="A selfie taken from very close range, showing the classic wide, distorted look — the forehead is enlarged and the features bulge toward the camera.">
+        <figcaption>Close-up — the wrong way</figcaption>
+      </figure>
+      <figure>
+        <img src="media/zoomed_out_face.webp" alt="A portrait taken from several feet away with the camera zoomed in to match the framing, showing natural, undistorted proportions.">
+        <figcaption>Stepped back + zoomed in — the right way</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        Why the difference? When the camera is close to a face, the center of
+        projection sits close too, so parts of the face nearer the lens (the
+        nose, forehead) subtend a much wider angle than parts farther away
+        (the ears) &mdash; the near features balloon relative to the far ones.
+        Step back and zoom in to compensate, and the camera-to-subject
+        distance becomes large relative to the depth of the face itself, so
+        every feature is roughly equidistant from the lens. The angles even
+        out, and the result reads as normal, flattering proportions.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="part2">
+    <span class="eyebrow">Part 2</span>
+    <h2>Architectural Perspective Compression</h2>
+    <p class="section-intro">
+      Sather Tower (the Campanile), shot two ways: zoomed in from a
+      distance, and up close without zoom.
+    </p>
+
+    <div class="compare">
+      <figure>
+        <img src="media/zoomed_in_campanile.webp" alt="The Campanile photographed from a distance with the camera zoomed in, showing the full tower and its surrounding plaza with a flattened, compressed sense of depth.">
+        <figcaption>Zoomed in from a distance</figcaption>
+      </figure>
+      <figure>
+        <img src="media/zoomed_out_campanile.webp" alt="The Campanile photographed from close up without zoom, looking sharply upward, with dramatically converging vertical lines.">
+        <figcaption>Walked closer, no zoom</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        Standing far away and zooming in narrows the field of view enough
+        that the distance from the camera to the base of the tower and the
+        distance to its spire become nearly equal &mdash; depth gets compressed,
+        and the tower reads as flatter against its background. Walk up close
+        instead, and the base of the tower is now dramatically nearer to the
+        camera than the top is, so the vertical lines converge sharply toward
+        a vanishing point &mdash; the same building suddenly feels like it&rsquo;s
+        looming overhead.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="part3">
+    <span class="eyebrow">Part 3</span>
+    <h2>The Dolly Zoom</h2>
+    <p class="section-intro">
+      The &ldquo;Vertigo&rdquo; effect: move the camera back while zooming in to keep
+      the subject the same size, and the background stretches and warps
+      around it. Eight handheld stills, stitched into a loop.
+    </p>
+
+    <figure class="feature">
+      <img src="media/dolly_zoom.gif" alt="Animated dolly zoom effect: a Charizard figure stays a constant size in frame while the background behind it visibly stretches and shifts as the camera moves back and zooms in.">
+      <figcaption>8 stills, ping-ponged into a loop</figcaption>
+    </figure>
+
+    <div class="filmstrip">
+      <img src="media/1.webp" alt="Dolly zoom source frame 1">
+      <img src="media/2.webp" alt="Dolly zoom source frame 2">
+      <img src="media/3.webp" alt="Dolly zoom source frame 3">
+      <img src="media/4.webp" alt="Dolly zoom source frame 4">
+      <img src="media/5.webp" alt="Dolly zoom source frame 5">
+      <img src="media/6.webp" alt="Dolly zoom source frame 6">
+      <img src="media/7.webp" alt="Dolly zoom source frame 7">
+      <img src="media/8.webp" alt="Dolly zoom source frame 8">
+    </div>
+
+    <div class="bonus">
+      <span class="eyebrow">Bonus</span>
+      <h3>Continuous comparison</h3>
+      <p class="section-intro">
+        The same move, shot as a continuous video instead of stills, for
+        comparison against the stitched GIF above.
+      </p>
+      <figure class="feature">
+        <video controls playsinline>
+          <source src="media/dolly_effect.mov" type="video/quicktime">
+          Your browser can't play this video inline.
+        </video>
+        <figcaption>
+          If the video above doesn't play,
+          <a class="fallback-link" href="media/dolly_effect.mov" target="_blank" rel="noopener">open it directly</a>.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <a href="../index.html">&larr; Back to portfolio</a>
+  </footer>
+
+</body>
+</html>

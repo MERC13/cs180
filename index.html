@@ -1,16 +1,51 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>My Portfolio</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jonah Cha — CS 180</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Welcome to My CS180 Portfolio!</h1>
-    <a href="./1/index.html">Project 1</a>
+
+  <header class="site-header">
+    <a class="site-name" href="index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="https://github.com/MERC13/cs180" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">CS 180 &middot; Fall 2026</span>
+    <h1>Computational Photography, project by project</h1>
+    <p class="intro">
+      A running log of projects for Berkeley's Intro to Computer Vision and
+      Computational Photography &mdash; perspective and optics, image
+      processing, stitching, view synthesis, and generative models, each
+      written up as its own page.
+    </p>
+  </section>
+
+  <ul class="project-list">
+    <li>
+      <a class="project-item" href="proj0/index.html">
+        <span class="eyebrow">Project 0</span>
+        <div class="project-title">Becoming Friends with Your Camera <span class="arrow">&rarr;</span></div>
+        <p class="project-desc">Perspective distortion, architectural compression, and a Hitchcock dolly zoom.</p>
+      </a>
+    </li>
+  </ul>
+
+  </main>
+
+  <footer class="site-footer">
+    <span>Jonah Cha &middot; CS 180, Fall 2026</span>
+  </footer>
+
 </body>
 </html>

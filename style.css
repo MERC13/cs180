@@ -1,0 +1,319 @@
+/* Shared design system for the whole site — homepage, proj0, and every
+   project page after it link to this same file so the look stays one
+   coherent thing as the portfolio grows. */
+
+:root {
+  --color-bg: #faf9f6;
+  --color-text: #1c1b19;
+  --color-text-muted: #6e6a63;
+  --color-border: #e4e1da;
+  --color-accent: #a64b2a;
+  --color-surface: #f1efe9;
+
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
+  --content-width: 760px;
+  --wide-width: 980px;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.75rem;
+  --space-4: 3rem;
+  --space-5: 5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #171613;
+    --color-text: #ece9e2;
+    --color-text-muted: #9b968c;
+    --color-border: #302d27;
+    --color-accent: #d97a52;
+    --color-surface: #201f1b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: 1.15;
+  margin: 0 0 var(--space-2);
+}
+
+h1 { font-size: clamp(2.25rem, 4vw + 1rem, 3.4rem); }
+h2 { font-size: clamp(1.5rem, 2vw + 1rem, 2rem); }
+h3 { font-size: 1.15rem; }
+
+p {
+  margin: 0 0 var(--space-2);
+  max-width: 65ch;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: var(--color-border);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
+}
+
+img, video {
+  max-width: 100%;
+  display: block;
+}
+
+/* Eyebrow / small-caps label, used for tags, captions, metadata */
+.eyebrow {
+  display: inline-block;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.eyebrow.accent {
+  color: var(--color-accent);
+}
+
+/* Header / nav, shared across every page */
+.site-header {
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.site-header .site-name {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-nav a {
+  font-size: 0.9rem;
+  text-decoration: none;
+  color: var(--color-text-muted);
+}
+
+.site-nav a:hover {
+  color: var(--color-accent);
+}
+
+/* Hero title block, used on homepage and every project page */
+.hero {
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-2) var(--space-3);
+}
+
+.hero h1 {
+  margin-top: var(--space-1);
+}
+
+.hero .intro {
+  color: var(--color-text-muted);
+  font-size: 1.05rem;
+  max-width: 60ch;
+}
+
+.hero .meta {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+/* Generic vertical-rhythm wrapper for page sections */
+.section {
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.section > .section-intro {
+  max-width: 60ch;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+/* In-page part navigation */
+.toc {
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  padding: 0 var(--space-2) var(--space-3);
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.toc a {
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid transparent;
+}
+
+.toc a:hover {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+/* Side-by-side image comparison grid */
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 700px) {
+  .compare {
+    grid-template-columns: 1fr;
+  }
+}
+
+.compare figure {
+  margin: 0;
+}
+
+.compare img {
+  width: 100%;
+  border-radius: 3px;
+  background: var(--color-surface);
+}
+
+figcaption {
+  margin-top: var(--space-1);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.reflection {
+  border-left: 2px solid var(--color-border);
+  padding-left: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.reflection p:last-child {
+  margin-bottom: 0;
+}
+
+/* Featured single media (the GIF / video) */
+.feature {
+  margin: 0 auto var(--space-3);
+  max-width: 560px;
+  text-align: center;
+}
+
+.feature img, .feature video {
+  width: 100%;
+  border-radius: 4px;
+  background: var(--color-surface);
+}
+
+.feature figcaption {
+  text-align: center;
+}
+
+/* Filmstrip of small source thumbnails */
+.filmstrip {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  padding: var(--space-1) 0 var(--space-2);
+  margin: 0 auto;
+  max-width: var(--wide-width);
+}
+
+.filmstrip img {
+  height: 90px;
+  width: auto;
+  flex: none;
+  border-radius: 2px;
+  background: var(--color-surface);
+}
+
+.bonus {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+}
+
+.fallback-link {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+/* Homepage project list */
+.project-list {
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  padding: 0 var(--space-2) var(--space-5);
+  list-style: none;
+}
+
+.project-item {
+  display: block;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  text-decoration: none;
+}
+
+.project-item:hover .project-title {
+  color: var(--color-accent);
+}
+
+.project-item .project-title {
+  font-family: var(--font-serif);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.project-item .project-desc {
+  color: var(--color-text-muted);
+  margin-top: var(--space-1);
+}
+
+.project-item .arrow {
+  color: var(--color-accent);
+}
+
+/* Footer */
+.site-footer {
+  max-width: var(--wide-width);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-2) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
