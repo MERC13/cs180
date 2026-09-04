@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project 1 — Colorizing the Prokudin-Gorskii Photo Collection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="site-name" href="../index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="../index.html">&larr; Portfolio</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">Project 1</span>
+    <h1>Colorizing the Prokudin-Gorskii Photo Collection</h1>
+    <p class="intro">
+      Between 1909 and 1915, Sergei Prokudin-Gorskii photographed the Russian
+      Empire in color &mdash; decades before color film existed &mdash; by
+      recording three black-and-white exposures of every scene through red,
+      green, and blue filters. Digitized glass plates from that collection
+      arrive as one tall grayscale strip of three stacked exposures; this
+      project automatically finds the alignment that recombines them into a
+      single color photo.
+    </p>
+    <div class="meta">
+      <span class="eyebrow">CS 180 &middot; Fall 2026</span>
+      <span class="eyebrow">Due Sept 15, 2026</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <a href="#background">Background</a>
+    <a href="#method">Method</a>
+    <a href="#single-scale">Single-Scale Results</a>
+    <a href="#multi-scale">Multi-Scale Pyramid Results</a>
+    <a href="#custom">Custom Images</a>
+    <a href="#failures">Failure Cases</a>
+  </nav>
+
+  <section class="section" id="background">
+    <span class="eyebrow">Background</span>
+    <h2>Three exposures, one camera, no color film</h2>
+    <p class="section-intro">
+      Prokudin-Gorskii (1863&ndash;1944) built a camera that took the same
+      scene three times through red, green, and blue filters onto a single
+      glass plate, then projected all three back through matching filters to
+      reconstruct color &mdash; a trick that worked in a lecture hall but
+      obviously doesn't survive being scanned as a flat image.
+    </p>
+    <p>
+      The Library of Congress digitized the surviving plates as single
+      grayscale strips: the blue exposure on top, green in the middle, red on
+      the bottom, each occupying roughly the same frame but shifted by a few
+      to a few hundred pixels from the last, since the camera moved slightly
+      between exposures. Recombining them is a search problem: split the
+      strip into thirds, then find the (x, y) shift that best lines up G and
+      R against B. Because the camera didn't rotate or change distance
+      between exposures, a simple translation is enough &mdash; no need to
+      search over rotation or scale.
+    </p>
+  </section>
+
+  <section class="section" id="method">
+    <span class="eyebrow">Method</span>
+    <h2>Exhaustive search, then a pyramid to make it fast</h2>
+    <p class="section-intro">
+      Split each scan into equal B, G, R thirds, crop in from the edges so
+      border artifacts don't pollute the score, then search for the
+      displacement that makes each channel match B best.
+    </p>
+
+    <figure class="feature">
+      <img src="out/cathedral_raw_preview.jpg" alt="The raw cathedral.jpg glass plate scan before alignment: three near-identical grayscale exposures stacked vertically, slightly offset from each other.">
+      <figcaption>A raw scan before alignment &mdash; B, G, R exposures stacked top to bottom, each shifted a few pixels from the last.</figcaption>
+    </figure>
+
+    <p>
+      Two scoring metrics decide how well a candidate shift lines up two
+      channels:
+    </p>
+    <ul>
+      <li><strong>L2 / Euclidean distance</strong> &mdash; <code>sqrt(sum((image1 - image2)^2))</code>, minimized at the best alignment.</li>
+      <li><strong>Normalized Cross-Correlation (NCC)</strong> &mdash; the dot product of each image mean-subtracted and normalized to unit length, maximized at the best alignment.</li>
+    </ul>
+
+    <h3>Single-scale: brute force</h3>
+    <p>
+      For the small JPEGs, an exhaustive search is cheap: try every
+      displacement in a window of candidate (x, y) shifts, score each one
+      against the reference channel, and keep the best. This is the whole
+      algorithm for <a href="#single-scale">Part 1</a> &mdash; no pyramid
+      involved.
+    </p>
+
+    <h3>Multi-scale: coarse-to-fine pyramid</h3>
+    <p>
+      The full-resolution <code>.tif</code> scans are thousands of pixels
+      tall with true displacements well beyond what a small search window can
+      reach, and searching a wide window at full resolution is far too slow.
+      Instead, the pyramid downsamples both channels by powers of two,
+      aligns at the coarsest (smallest, cheapest) level first with a wide
+      search window, then walks back up: at each finer level it doubles the
+      previous level's shift as a starting guess, applies it, and searches
+      only a small residual window to refine it. Each level's correction
+      accumulates into the final total shift. The recursion, downsampling,
+      and shifting are all implemented directly &mdash; only generic
+      utilities (<code>cv2.resize</code> for downsampling, <code>np.roll</code>
+      for shifting) are used, no built-in pyramid or auto-alignment routines.
+    </p>
+  </section>
+
+  <section class="section" id="single-scale">
+    <span class="eyebrow">Part 1</span>
+    <h2>Single-Scale Results</h2>
+    <p class="section-intro">
+      Exhaustive L2 search on the three provided low-resolution JPEGs.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/cathedral_aligned_L2.jpg" alt="Cathedral photo, color channels aligned.">
+        <figcaption>cathedral.jpg &mdash; G: (2, 5) &nbsp; R: (1, 7)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/monastery_aligned_L2.jpg" alt="Monastery photo, color channels aligned.">
+        <figcaption>monastery.jpg &mdash; G: (2, &minus;3) &nbsp; R: (2, 3)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/tobolsk_aligned_L2.jpg" alt="Tobolsk photo, color channels aligned.">
+        <figcaption>tobolsk.jpg &mdash; G: (3, 3) &nbsp; R: (3, 6)</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="multi-scale">
+    <span class="eyebrow">Part 2</span>
+    <h2>Multi-Scale Pyramid Results</h2>
+    <p class="section-intro">
+      The same three JPEGs plus all 11 full-resolution TIFFs, run through the
+      coarse-to-fine pyramid instead of direct search &mdash; a check that the
+      pyramid reproduces Part 1's results on the JPEGs, and the only way the
+      thousands-of-pixels-tall TIFFs finish at all. All 14 images together
+      took 116.5s (about 8s/image on average), well inside the one-minute-per-image
+      target.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/cathedral_aligned_L2.jpg" alt="Cathedral photo, color channels aligned via pyramid search.">
+        <figcaption>cathedral.jpg &mdash; G: (2, 5) &nbsp; R: (3, 12)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/monastery_aligned_L2.jpg" alt="Monastery photo, color channels aligned via pyramid search.">
+        <figcaption>monastery.jpg &mdash; G: (2, &minus;3) &nbsp; R: (2, 3)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/tobolsk_aligned_L2.jpg" alt="Tobolsk photo, color channels aligned via pyramid search.">
+        <figcaption>tobolsk.jpg &mdash; G: (3, 3) &nbsp; R: (3, 6)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/church_aligned_L2.jpg" alt="Church photo, color channels aligned via pyramid search.">
+        <figcaption>church.tif &mdash; G: (4, 25) &nbsp; R: (&minus;4, 58)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/emir_aligned_L2.jpg" alt="Emir of Bukhara photo, color channels badly misaligned with strong ghosting.">
+        <figcaption>emir.tif &mdash; G: (24, 49) &nbsp; R: (&minus;215, 97) &mdash; misaligned, see below</figcaption>
+      </figure>
+      <figure>
+        <img src="out/harvesters_aligned_L2.jpg" alt="Harvesters photo, color channels aligned via pyramid search.">
+        <figcaption>harvesters.tif &mdash; G: (16, 59) &nbsp; R: (13, 123)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/icon_aligned_L2.jpg" alt="Icon photo, color channels aligned via pyramid search.">
+        <figcaption>icon.tif &mdash; G: (17, 41) &nbsp; R: (23, 89)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/ilemselga_aligned_L2.jpg" alt="Ilemselga photo, color channels aligned via pyramid search.">
+        <figcaption>ilemselga.tif &mdash; G: (7, 40) &nbsp; R: (11, 130)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/melons_aligned_L2.jpg" alt="Melon stand photo, color channels aligned via pyramid search.">
+        <figcaption>melons.tif &mdash; G: (10, 81) &nbsp; R: (13, 178)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/religous_painting_aligned_L2.jpg" alt="Religious painting photo, color channels aligned via pyramid search.">
+        <figcaption>religous_painting.tif &mdash; G: (3, 27) &nbsp; R: (7, 68)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/self_portrait_aligned_L2.jpg" alt="Self portrait photo, color channels aligned via pyramid search.">
+        <figcaption>self_portrait.tif &mdash; G: (29, 78) &nbsp; R: (37, 176)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/siren_aligned_L2.jpg" alt="Siren ship photo, color channels aligned via pyramid search.">
+        <figcaption>siren.tif &mdash; G: (&minus;6, 49) &nbsp; R: (&minus;25, 95)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/three_generations_aligned_L2.jpg" alt="Three generations photo, color channels aligned via pyramid search.">
+        <figcaption>three_generations.tif &mdash; G: (14, 53) &nbsp; R: (11, 112)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/wharf_aligned_L2.jpg" alt="Wharf photo, color channels aligned via pyramid search.">
+        <figcaption>wharf.tif &mdash; G: (&minus;7, 15) &nbsp; R: (&minus;16, 82)</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="custom">
+    <span class="eyebrow">Part 3</span>
+    <h2>Custom Images</h2>
+    <p class="section-intro">
+      Three more Prokudin-Gorskii plates run through the same multi-scale
+      pipeline, unseen by any tuning done for the provided set.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/ceramic_aligned_L2.jpg" alt="Ceramic sculpture photo, color channels aligned.">
+        <figcaption>ceramic.jpg &mdash; G: (3, 2) &nbsp; R: (7, 0)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/woman_aligned_L2.jpg" alt="Portrait of a woman on a balcony, color channels aligned.">
+        <figcaption>woman.jpg &mdash; G: (2, 4) &nbsp; R: (4, 7)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/beans_aligned_L2.jpg" alt="Grid of bean or fabric swatches, color channels badly misaligned with visible magenta and green ghosting.">
+        <figcaption>beans.jpg &mdash; G: (&minus;4, &minus;23) &nbsp; R: (&minus;9, 11) &mdash; misaligned, see below</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="failures">
+    <span class="eyebrow">Limitations</span>
+    <h2>Failure Cases</h2>
+    <p class="section-intro">
+      The assignment allows one misaligned image out of the full set; two
+      candidates showed up, both for the same underlying reason &mdash; the
+      L2/NCC metrics compare raw pixel intensities, which assumes the three
+      channels agree on what's bright and what's textured. That assumption
+      breaks in specific ways.
+    </p>
+
+    <h3>beans.jpg &mdash; repeating texture</h3>
+    <p>
+      <code>beans.jpg</code> is a tight grid of near-identical fabric or bean
+      swatches &mdash; a strongly periodic pattern. L2/NCC search over raw
+      intensities can't tell the true alignment apart from one shifted by a
+      whole grid cell; several offsets score nearly as well as the correct
+      one, and the search latched onto the wrong one (visible above as heavy
+      magenta/green fringing across the whole image, not just at the edges).
+      Gradient- or edge-based features, or restricting the coarse search
+      window, would likely help here.
+    </p>
+
+    <h3>emir.tif &mdash; mismatched channel brightness</h3>
+    <figure class="feature">
+      <img src="out/emir_aligned_L2.jpg" alt="Emir of Bukhara photo with visible double-exposure ghosting from failed alignment.">
+      <figcaption>The red channel lands 215px off horizontally &mdash; a clearly wrong local optimum.</figcaption>
+    </figure>
+    <p>
+      The assignment calls this plate out by name for a reason: the three
+      exposures don't just differ in content, they differ in overall
+      brightness and contrast, likely from uneven exposure times or plate
+      degradation. L2 and NCC both implicitly assume corresponding pixels
+      should have similar intensity once aligned &mdash; when that assumption
+      fails, the metric's global minimum stops corresponding to the true
+      geometric alignment, and the search confidently returns a wrong answer
+      (here, a 215px horizontal red-channel shift, versus 24&ndash;49px for
+      every other channel on this plate). A per-channel contrast/brightness
+      normalization step before scoring, or switching to gradient-based
+      features that are invariant to brightness offsets, would be the
+      natural fix.
+    </p>
+  </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <a href="../index.html">&larr; Back to portfolio</a>
+  </footer>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import glob
+import os
 
 # ====== UTILS ====== #
 
@@ -85,11 +86,14 @@ def analyze_single_scale():
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
+CUSTOM_IMAGES = ['beans.jpg', 'ceramic.jpg', 'woman.jpg']
+
 def analyze_multi_scale():
-    imgs = glob.glob('data/*.jpg')+glob.glob('data/*.tif')
+    imgs = glob.glob('data/*.jpg') + glob.glob('data/*.tif')
+    imgs = [f for f in imgs if os.path.basename(f) not in CUSTOM_IMAGES]
     for imname in imgs:
         im = cv2.imread(imname, cv2.IMREAD_GRAYSCALE) # (1024, 390) uint8
-                    
+
         # separate color channels
         height = np.floor(im.shape[0] / 3.0).astype(np.int64)
         b = im[:height]
@@ -107,7 +111,36 @@ def analyze_multi_scale():
 
         # save the image
         print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
-        fname = f'./out/{imname.split("/")[-1].split(".")[0]}_aligned_{metric}.jpg'
+        basename = os.path.splitext(os.path.basename(imname))[0]
+        fname = f'./out/{basename}_aligned_{metric}.jpg'
+        cv2.imwrite(fname, im_out)
+        show_fit('Aligned Image', im_out)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+def analyze_custom_images():
+    for imname in CUSTOM_IMAGES:
+        im = cv2.imread(f"data/{imname}", cv2.IMREAD_GRAYSCALE)
+
+        # separate color channels
+        height = np.floor(im.shape[0] / 3.0).astype(np.int64)
+        b = im[:height]
+        g = im[height: 2*height]
+        r = im[2*height: 3*height]
+
+        b = crop(b)
+        g = crop(g)
+        r = crop(r)
+
+        metric = "L2"
+        ag, ag_shift = pyramid_search(g, b, metric)
+        ar, ar_shift = pyramid_search(r, b, metric)
+        im_out = np.dstack([b, ag, ar])
+
+        # save the image
+        print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
+        basename = os.path.splitext(imname)[0]
+        fname = f'./out/{basename}_aligned_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
         cv2.waitKey(0)
@@ -120,6 +153,8 @@ def __main__():
     analyze_single_scale()
     print("Analyzing multi-scale images...\n\n\n")
     analyze_multi_scale()
+    print("Analyzing custom images...\n\n\n")
+    analyze_custom_images()
 
 if __name__ == "__main__":
     __main__()
