@@ -4,7 +4,7 @@ import glob
 
 # ====== UTILS ====== #
 
-def crop(a, frac=0.05):
+def crop(a, frac=0.1):
     h, w = a.shape
     dh, dw = int(h*frac), int(w*frac)
     return a[dh:h-dh, dw:w-dw]
@@ -43,7 +43,7 @@ def align(im1, im2, metric, window=7):
 
 def pyramid_search(im1, im2, metric, scale=0.0625, window=15):
     if scale == 1:
-        return align(im1, im2, window)
+        return align(im1, im2, metric, window=window)
     else:
         im1_small = cv2.resize(im1, (int(im1.shape[1] * scale), int(im1.shape[0] * scale)))
         im2_small = cv2.resize(im2, (int(im2.shape[1] * scale), int(im2.shape[0] * scale)))
@@ -78,7 +78,7 @@ def analyze_single_scale():
         im_out = np.dstack([b, ag, ar])
 
         # save the image
-        print(f"Green channel shift (x,y): {(ag_shift[1], ag_shift[0])}, Red channel shift (x,y): {(ar_shift[1], ar_shift[0])}")
+        print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
         fname = f'./out/{imname.split(".")[0]}_aligned_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
@@ -100,13 +100,13 @@ def analyze_multi_scale():
         g = crop(g)
         r = crop(r)
 
-        metric = "NCC"
+        metric = "L2"
         ag, ag_shift = pyramid_search(g, b, metric)
         ar, ar_shift = pyramid_search(r, b, metric)
         im_out = np.dstack([b, ag, ar])
 
         # save the image
-        print(f"Green channel shift (x,y): {(ag_shift[1], ag_shift[0])}, Red channel shift (x,y): {(ar_shift[1], ar_shift[0])}")
+        print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
         fname = f'./out/{imname.split("/")[-1].split(".")[0]}_aligned_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
@@ -116,7 +116,9 @@ def analyze_multi_scale():
 
 # ===== MAIN ====== #
 def __main__():
-    # analyze_single_scale()
+    print("Analyzing single scale images...\n\n\n")
+    analyze_single_scale()
+    print("Analyzing multi-scale images...\n\n\n")
     analyze_multi_scale()
 
 if __name__ == "__main__":
