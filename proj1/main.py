@@ -17,32 +17,61 @@ def show_fit(window_name, img, max_dim=900):
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
     cv2.imshow(window_name, img)
 
-def align(im1, im2, metric, window=7):
+def grad_mag(im):
+    gx = cv2.Sobel(im.astype(np.float64), cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(im.astype(np.float64), cv2.CV_64F, 0, 1, ksize=3)
+    return np.sqrt(gx ** 2 + gy ** 2)
+
+def align(im1, im2, metric, window=15):
     best_shift = (0, 0)
     best_score = float('inf') if metric == "L2" else -float('inf')
     shift_range = range(-window, window + 1)
+    h, w = im1.shape
+
+    # score on gradient magnitude rather than raw intensity: far less
+    # sensitive to per-channel brightness differences, and better at telling
+    # apart visually-similar repeated structures (e.g. matching domes) than
+    # raw pixel values are
+    grad1 = grad_mag(im1)
+    grad2 = grad_mag(im2)
 
     for dx in shift_range:
         for dy in shift_range:
-            shifted_im1 = np.roll(im1, shift=(dy, dx), axis=(0, 1))
+            shifted_grad1 = np.roll(grad1, shift=(dy, dx), axis=(0, 1))
+
+            # exclude exactly the rows/columns this shift wrapped in from the
+            # opposite edge, so wraparound garbage never enters the score
+            my, mx = abs(dy), abs(dx)
+            s1 = shifted_grad1[my:h - my, mx:w - mx] if (my or mx) else shifted_grad1
+            s2 = grad2[my:h - my, mx:w - mx] if (my or mx) else grad2
 
             if metric == "L2":
-                score = np.sqrt(np.sum((shifted_im1.astype(np.float64) - im2) ** 2))
+                # mean, not sum: candidates get compared over different-sized
+                # regions now, so the score must be per-pixel to stay comparable
+                score = np.sqrt(np.mean((s1.astype(np.float64) - s2) ** 2))
                 if score < best_score:
                     best_score = score
                     best_shift = (dy, dx)
             elif metric == "NCC":
-                mean_im1 = shifted_im1 - shifted_im1.mean()
-                mean_im2 = im2 - im2.mean()
+                mean_im1 = s1 - s1.mean()
+                mean_im2 = s2 - s2.mean()
                 score = np.sum(mean_im1 * mean_im2) / (np.linalg.norm(mean_im1) * np.linalg.norm(mean_im2))
 
                 if score > best_score:
                     best_score = score
                     best_shift = (dy, dx)
-        
+
     return np.roll(im1, shift=best_shift, axis=(0, 1)), best_shift
 
-def pyramid_search(im1, im2, metric, scale=0.0625, window=15):
+def pyramid_search(im1, im2, metric, scale=None, window=15):
+    if scale is None:
+        # pick a starting (coarsest) scale so that level isn't degenerately
+        # tiny on small images, but never coarser than 1/16 (tuned for the
+        # multi-thousand-pixel scans)
+        scale = 1.0
+        while min(im1.shape) * scale > 150 and scale > 0.0625:
+            scale /= 2
+
     if scale == 1:
         return align(im1, im2, metric, window=window)
     else:
@@ -80,7 +109,7 @@ def analyze_single_scale():
 
         # save the image
         print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
-        fname = f'./out/{imname.split(".")[0]}_aligned_{metric}.jpg'
+        fname = f'./out/{imname.split(".")[0]}_singlescale_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
         cv2.waitKey(0)
@@ -112,7 +141,7 @@ def analyze_multi_scale():
         # save the image
         print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
         basename = os.path.splitext(os.path.basename(imname))[0]
-        fname = f'./out/{basename}_aligned_{metric}.jpg'
+        fname = f'./out/{basename}_multiscale_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
         cv2.waitKey(0)
@@ -140,7 +169,7 @@ def analyze_custom_images():
         # save the image
         print(f"Green channel shift (x,y): {(int(ag_shift[1]), int(ag_shift[0]))}, Red channel shift (x,y): {(int(ar_shift[1]), int(ar_shift[0]))}")
         basename = os.path.splitext(imname)[0]
-        fname = f'./out/{basename}_aligned_{metric}.jpg'
+        fname = f'./out/{basename}_multiscale_{metric}.jpg'
         cv2.imwrite(fname, im_out)
         show_fit('Aligned Image', im_out)
         cv2.waitKey(0)
@@ -149,11 +178,11 @@ def analyze_custom_images():
 
 # ===== MAIN ====== #
 def __main__():
-    print("Analyzing single scale images...\n\n\n")
+    print("Analyzing single scale images...")
     analyze_single_scale()
-    print("Analyzing multi-scale images...\n\n\n")
+    print("Analyzing multi-scale images...")
     analyze_multi_scale()
-    print("Analyzing custom images...\n\n\n")
+    print("Analyzing custom images...")
     analyze_custom_images()
 
 if __name__ == "__main__":

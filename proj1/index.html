@@ -44,7 +44,7 @@
     <a href="#single-scale">Single-Scale Results</a>
     <a href="#multi-scale">Multi-Scale Pyramid Results</a>
     <a href="#custom">Custom Images</a>
-    <a href="#failures">Failure Cases</a>
+    <a href="#debugging">The Hard Cases</a>
   </nav>
 
   <section class="section" id="background">
@@ -116,6 +116,35 @@
       and shifting are all implemented directly &mdash; only generic
       utilities (<code>cv2.resize</code> for downsampling, <code>np.roll</code>
       for shifting) are used, no built-in pyramid or auto-alignment routines.
+      The coarsest level's starting scale is chosen adaptively (never
+      downsampling past roughly 150px on the short side) so it stays
+      meaningful on both a ~300px JPEG channel and a ~3000px TIFF channel.
+    </p>
+    <p>
+      One subtlety that mattered more than expected:
+      <code>np.roll</code> is circular, so every candidate shift wraps a strip
+      of garbage in from the opposite edge. Scoring the whole rolled array
+      against the reference (the naive approach) lets that wraparound noise
+      pollute every candidate's score, which was enough to send several
+      images to a visibly wrong optimum. The fix scores only the true overlap
+      region for each candidate &mdash; exactly the rows/columns that
+      candidate's shift actually wrapped in, no more &mdash; matching the
+      &ldquo;ignore borders, score on interior pixels&rdquo; guidance directly.
+    </p>
+
+    <h3>Bells &amp; whistles: gradient features</h3>
+    <p>
+      L2/NCC on raw pixel intensity is the required baseline, and it's what
+      produces correct results on almost every image here &mdash; but two
+      plates exposed real limits of comparing raw brightness: <code>emir.tif</code>,
+      where the channels don't agree on brightness/contrast, and
+      <code>church.tif</code>, which has four near-identical domes in a row
+      that raw intensity can barely tell apart. The fix (see
+      <a href="#debugging">The Hard Cases</a> for the before/after) is to score
+      on Sobel gradient magnitude instead of raw pixel values &mdash; still
+      L2 distance, just on a feature that reacts to edges and structure
+      rather than absolute brightness. Channels still get shifted and
+      composited as raw pixels; only the search uses gradients.
     </p>
   </section>
 
@@ -128,15 +157,15 @@
 
     <div class="gallery">
       <figure>
-        <img src="out/cathedral_aligned_L2.jpg" alt="Cathedral photo, color channels aligned.">
-        <figcaption>cathedral.jpg &mdash; G: (2, 5) &nbsp; R: (1, 7)</figcaption>
+        <img src="out/cathedral_singlescale_L2.jpg" alt="Cathedral photo, color channels aligned.">
+        <figcaption>cathedral.jpg &mdash; G: (2, 5) &nbsp; R: (3, 12)</figcaption>
       </figure>
       <figure>
-        <img src="out/monastery_aligned_L2.jpg" alt="Monastery photo, color channels aligned.">
+        <img src="out/monastery_singlescale_L2.jpg" alt="Monastery photo, color channels aligned.">
         <figcaption>monastery.jpg &mdash; G: (2, &minus;3) &nbsp; R: (2, 3)</figcaption>
       </figure>
       <figure>
-        <img src="out/tobolsk_aligned_L2.jpg" alt="Tobolsk photo, color channels aligned.">
+        <img src="out/tobolsk_singlescale_L2.jpg" alt="Tobolsk photo, color channels aligned.">
         <figcaption>tobolsk.jpg &mdash; G: (3, 3) &nbsp; R: (3, 6)</figcaption>
       </figure>
     </div>
@@ -150,66 +179,66 @@
       coarse-to-fine pyramid instead of direct search &mdash; a check that the
       pyramid reproduces Part 1's results on the JPEGs, and the only way the
       thousands-of-pixels-tall TIFFs finish at all. All 14 images together
-      took 116.5s (about 8s/image on average), well inside the one-minute-per-image
+      took 103s (about 7s/image on average), well inside the one-minute-per-image
       target.
     </p>
 
     <div class="gallery">
       <figure>
-        <img src="out/cathedral_aligned_L2.jpg" alt="Cathedral photo, color channels aligned via pyramid search.">
+        <img src="out/cathedral_multiscale_L2.jpg" alt="Cathedral photo, color channels aligned via pyramid search.">
         <figcaption>cathedral.jpg &mdash; G: (2, 5) &nbsp; R: (3, 12)</figcaption>
       </figure>
       <figure>
-        <img src="out/monastery_aligned_L2.jpg" alt="Monastery photo, color channels aligned via pyramid search.">
+        <img src="out/monastery_multiscale_L2.jpg" alt="Monastery photo, color channels aligned via pyramid search.">
         <figcaption>monastery.jpg &mdash; G: (2, &minus;3) &nbsp; R: (2, 3)</figcaption>
       </figure>
       <figure>
-        <img src="out/tobolsk_aligned_L2.jpg" alt="Tobolsk photo, color channels aligned via pyramid search.">
+        <img src="out/tobolsk_multiscale_L2.jpg" alt="Tobolsk photo, color channels aligned via pyramid search.">
         <figcaption>tobolsk.jpg &mdash; G: (3, 3) &nbsp; R: (3, 6)</figcaption>
       </figure>
       <figure>
-        <img src="out/church_aligned_L2.jpg" alt="Church photo, color channels aligned via pyramid search.">
+        <img src="out/church_multiscale_L2.jpg" alt="Church photo, color channels aligned via pyramid search.">
         <figcaption>church.tif &mdash; G: (4, 25) &nbsp; R: (&minus;4, 58)</figcaption>
       </figure>
       <figure>
-        <img src="out/emir_aligned_L2.jpg" alt="Emir of Bukhara photo, color channels badly misaligned with strong ghosting.">
-        <figcaption>emir.tif &mdash; G: (24, 49) &nbsp; R: (&minus;215, 97) &mdash; misaligned, see below</figcaption>
+        <img src="out/emir_multiscale_L2.jpg" alt="Emir of Bukhara photo, color channels aligned via pyramid search.">
+        <figcaption>emir.tif &mdash; G: (24, 49) &nbsp; R: (40, 107)</figcaption>
       </figure>
       <figure>
-        <img src="out/harvesters_aligned_L2.jpg" alt="Harvesters photo, color channels aligned via pyramid search.">
-        <figcaption>harvesters.tif &mdash; G: (16, 59) &nbsp; R: (13, 123)</figcaption>
+        <img src="out/harvesters_multiscale_L2.jpg" alt="Harvesters photo, color channels aligned via pyramid search.">
+        <figcaption>harvesters.tif &mdash; G: (17, 60) &nbsp; R: (14, 124)</figcaption>
       </figure>
       <figure>
-        <img src="out/icon_aligned_L2.jpg" alt="Icon photo, color channels aligned via pyramid search.">
-        <figcaption>icon.tif &mdash; G: (17, 41) &nbsp; R: (23, 89)</figcaption>
+        <img src="out/icon_multiscale_L2.jpg" alt="Icon photo, color channels aligned via pyramid search.">
+        <figcaption>icon.tif &mdash; G: (17, 42) &nbsp; R: (23, 90)</figcaption>
       </figure>
       <figure>
-        <img src="out/ilemselga_aligned_L2.jpg" alt="Ilemselga photo, color channels aligned via pyramid search.">
-        <figcaption>ilemselga.tif &mdash; G: (7, 40) &nbsp; R: (11, 130)</figcaption>
+        <img src="out/ilemselga_multiscale_L2.jpg" alt="Ilemselga photo, color channels aligned via pyramid search.">
+        <figcaption>ilemselga.tif &mdash; G: (7, 40) &nbsp; R: (11, 131)</figcaption>
       </figure>
       <figure>
-        <img src="out/melons_aligned_L2.jpg" alt="Melon stand photo, color channels aligned via pyramid search.">
-        <figcaption>melons.tif &mdash; G: (10, 81) &nbsp; R: (13, 178)</figcaption>
+        <img src="out/melons_multiscale_L2.jpg" alt="Melon stand photo, color channels aligned via pyramid search.">
+        <figcaption>melons.tif &mdash; G: (10, 80) &nbsp; R: (13, 177)</figcaption>
       </figure>
       <figure>
-        <img src="out/religous_painting_aligned_L2.jpg" alt="Religious painting photo, color channels aligned via pyramid search.">
-        <figcaption>religous_painting.tif &mdash; G: (3, 27) &nbsp; R: (7, 68)</figcaption>
+        <img src="out/religous_painting_multiscale_L2.jpg" alt="Religious painting photo, color channels aligned via pyramid search.">
+        <figcaption>religous_painting.tif &mdash; G: (1, 30) &nbsp; R: (6, 70)</figcaption>
       </figure>
       <figure>
-        <img src="out/self_portrait_aligned_L2.jpg" alt="Self portrait photo, color channels aligned via pyramid search.">
+        <img src="out/self_portrait_multiscale_L2.jpg" alt="Self portrait photo, color channels aligned via pyramid search.">
         <figcaption>self_portrait.tif &mdash; G: (29, 78) &nbsp; R: (37, 176)</figcaption>
       </figure>
       <figure>
-        <img src="out/siren_aligned_L2.jpg" alt="Siren ship photo, color channels aligned via pyramid search.">
-        <figcaption>siren.tif &mdash; G: (&minus;6, 49) &nbsp; R: (&minus;25, 95)</figcaption>
+        <img src="out/siren_multiscale_L2.jpg" alt="Siren ship photo, color channels aligned via pyramid search.">
+        <figcaption>siren.tif &mdash; G: (&minus;6, 49) &nbsp; R: (&minus;24, 96)</figcaption>
       </figure>
       <figure>
-        <img src="out/three_generations_aligned_L2.jpg" alt="Three generations photo, color channels aligned via pyramid search.">
-        <figcaption>three_generations.tif &mdash; G: (14, 53) &nbsp; R: (11, 112)</figcaption>
+        <img src="out/three_generations_multiscale_L2.jpg" alt="Three generations photo, color channels aligned via pyramid search.">
+        <figcaption>three_generations.tif &mdash; G: (12, 54) &nbsp; R: (9, 111)</figcaption>
       </figure>
       <figure>
-        <img src="out/wharf_aligned_L2.jpg" alt="Wharf photo, color channels aligned via pyramid search.">
-        <figcaption>wharf.tif &mdash; G: (&minus;7, 15) &nbsp; R: (&minus;16, 82)</figcaption>
+        <img src="out/wharf_multiscale_L2.jpg" alt="Wharf photo, color channels aligned via pyramid search.">
+        <figcaption>wharf.tif &mdash; G: (&minus;7, 15) &nbsp; R: (&minus;16, 83)</figcaption>
       </figure>
     </div>
   </section>
@@ -224,61 +253,81 @@
 
     <div class="gallery">
       <figure>
-        <img src="out/ceramic_aligned_L2.jpg" alt="Ceramic sculpture photo, color channels aligned.">
-        <figcaption>ceramic.jpg &mdash; G: (3, 2) &nbsp; R: (7, 0)</figcaption>
+        <img src="out/ceramic_multiscale_L2.jpg" alt="Ceramic sculpture photo, color channels aligned.">
+        <figcaption>ceramic.jpg &mdash; G: (3, 2) &nbsp; R: (6, 11)</figcaption>
       </figure>
       <figure>
-        <img src="out/woman_aligned_L2.jpg" alt="Portrait of a woman on a balcony, color channels aligned.">
-        <figcaption>woman.jpg &mdash; G: (2, 4) &nbsp; R: (4, 7)</figcaption>
+        <img src="out/woman_multiscale_L2.jpg" alt="Portrait of a woman on a balcony, color channels aligned.">
+        <figcaption>woman.jpg &mdash; G: (2, 4) &nbsp; R: (4, 8)</figcaption>
       </figure>
       <figure>
-        <img src="out/beans_aligned_L2.jpg" alt="Grid of bean or fabric swatches, color channels badly misaligned with visible magenta and green ghosting.">
-        <figcaption>beans.jpg &mdash; G: (&minus;4, &minus;23) &nbsp; R: (&minus;9, 11) &mdash; misaligned, see below</figcaption>
+        <img src="out/beans_multiscale_L2.jpg" alt="Grid of bean or fabric swatches, color channels aligned with a faint border fringe.">
+        <figcaption>beans.jpg &mdash; G: (&minus;4, 4) &nbsp; R: (&minus;9, 11)</figcaption>
       </figure>
     </div>
   </section>
 
-  <section class="section" id="failures">
-    <span class="eyebrow">Limitations</span>
-    <h2>Failure Cases</h2>
+  <section class="section" id="debugging">
+    <span class="eyebrow">Debugging Journey</span>
+    <h2>The Hard Cases</h2>
     <p class="section-intro">
-      The assignment allows one misaligned image out of the full set; two
-      candidates showed up, both for the same underlying reason &mdash; the
-      L2/NCC metrics compare raw pixel intensities, which assumes the three
-      channels agree on what's bright and what's textured. That assumption
-      breaks in specific ways.
+      Two images stayed stubborn well past everything else: <code>emir.tif</code>,
+      which the assignment calls out by name, and <code>beans.jpg</code>, a
+      tight grid of near-identical swatches. Both turned out to share one
+      cause, and the fix for it briefly broke a third, previously-fine
+      image before a second fix resolved all three.
     </p>
 
-    <h3>beans.jpg &mdash; repeating texture</h3>
+    <h3>The actual bug: scoring included wraparound garbage</h3>
     <p>
-      <code>beans.jpg</code> is a tight grid of near-identical fabric or bean
-      swatches &mdash; a strongly periodic pattern. L2/NCC search over raw
-      intensities can't tell the true alignment apart from one shifted by a
-      whole grid cell; several offsets score nearly as well as the correct
-      one, and the search latched onto the wrong one (visible above as heavy
-      magenta/green fringing across the whole image, not just at the edges).
-      Gradient- or edge-based features, or restricting the coarse search
-      window, would likely help here.
+      <code>np.roll</code> is circular, so every candidate shift wraps a
+      strip of pixels in from the opposite edge that has nothing to do with
+      true alignment. The original scoring compared the whole rolled array,
+      wrapped strip included, which polluted the score badly enough to send
+      <code>emir.tif</code> and <code>beans.jpg</code> to a visibly wrong
+      optimum. Excluding exactly the rows/columns each candidate actually
+      wrapped in (see <a href="#method">Method</a>) fixed both outright.
     </p>
 
-    <h3>emir.tif &mdash; mismatched channel brightness</h3>
+    <h3>The side effect: church.tif broke</h3>
     <figure class="feature">
-      <img src="out/emir_aligned_L2.jpg" alt="Emir of Bukhara photo with visible double-exposure ghosting from failed alignment.">
-      <figcaption>The red channel lands 215px off horizontally &mdash; a clearly wrong local optimum.</figcaption>
+      <img src="out/church_before_raw_intensity.jpg" alt="Church photo with visible red/cyan ghosting from a red channel shifted far to the side, about one dome-width off.">
+      <figcaption>Before: raw-intensity L2, after the wraparound fix &mdash; the red channel lands 195px off, about one dome-width over.</figcaption>
     </figure>
     <p>
-      The assignment calls this plate out by name for a reason: the three
-      exposures don't just differ in content, they differ in overall
-      brightness and contrast, likely from uneven exposure times or plate
-      degradation. L2 and NCC both implicitly assume corresponding pixels
-      should have similar intensity once aligned &mdash; when that assumption
-      fails, the metric's global minimum stops corresponding to the true
-      geometric alignment, and the search confidently returns a wrong answer
-      (here, a 215px horizontal red-channel shift, versus 24&ndash;49px for
-      every other channel on this plate). A per-channel contrast/brightness
-      normalization step before scoring, or switching to gradient-based
-      features that are invariant to brightness offsets, would be the
-      natural fix.
+      This church has four visually similar onion domes in a row. Once the
+      wraparound-corrupted region was excluded from scoring, the true
+      alignment and &ldquo;shifted by about one dome&rdquo; scored nearly
+      identically under raw-intensity L2 &mdash; the domes just look too much
+      alike. The old, buggy whole-array scoring had accidentally been masking
+      this the entire time: it penalized wraparound content more as shift
+      magnitude grew, which incidentally discouraged the larger, wrong,
+      one-dome-over answer. That was never a real defense against periodic
+      content &mdash; just a lucky side effect of the same bug that was
+      breaking the other two images. Metric-swapping alone couldn't resolve
+      it cleanly either: NCC fixes <code>church.tif</code> but re-breaks
+      <code>emir.tif</code>, and raw-intensity L2 is the reverse &mdash; the
+      two images need opposite answers, and the assignment is explicit about
+      using one fixed set of parameters rather than tuning per image.
+    </p>
+
+    <h3>The fix: score on gradients, not raw intensity</h3>
+    <figure class="feature">
+      <img src="out/church_multiscale_L2.jpg" alt="Church photo, color channels correctly aligned with no visible ghosting.">
+      <figcaption>After: same pyramid, scored on Sobel gradient magnitude instead &mdash; G: (4, 25) &nbsp; R: (&minus;4, 58).</figcaption>
+    </figure>
+    <p>
+      Scoring on Sobel gradient magnitude instead of raw pixel intensity
+      &mdash; still L2 distance, just computed on a feature that reacts to
+      edges and structure rather than absolute brightness &mdash; fixed
+      <code>church.tif</code> without re-breaking <code>emir.tif</code>.
+      Gradients care less about the domes' near-identical brightness and more
+      about their slightly different silhouettes, and they sidestep
+      <code>emir.tif</code>'s channel brightness mismatch entirely, since
+      they never look at absolute intensity to begin with. Channels are
+      still shifted and composited as raw pixels; only the search itself
+      operates on gradients. Every other image was re-checked against this
+      change and stayed within a few pixels of its previous shift.
     </p>
   </section>
 
