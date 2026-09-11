@@ -1,3 +1,16 @@
+"""
+CS180 Project 1: Images of the Russian Empire -- Colorizing the
+Prokudin-Gorskii photo collection.
+
+Each input glass-plate scan stacks three grayscale exposures (blue, green,
+red, top to bottom) of the same scene. This script splits each scan into
+its three channels, aligns the green and red channels onto the blue
+channel, and stacks them into a single color image. Small .jpg scans are
+aligned with a brute-force search (analyze_single_scale); large .tif scans
+use an image pyramid so the search stays fast (analyze_multi_scale /
+analyze_custom_images).
+"""
+
 import numpy as np
 import cv2
 import glob
@@ -6,11 +19,15 @@ import os
 # ====== UTILS ====== #
 
 def crop(a, frac=0.1):
+    """Trim a fraction of each border off a channel to discard the plate's
+    ragged/torn edges, which would otherwise dominate the alignment score."""
     h, w = a.shape
     dh, dw = int(h*frac), int(w*frac)
     return a[dh:h-dh, dw:w-dw]
 
 def show_fit(window_name, img, max_dim=900):
+    """Display img in a window, downscaling (never upscaling) so it fits
+    within max_dim pixels on its longer side."""
     h, w = img.shape[:2]
     scale = min(max_dim / h, max_dim / w, 1.0)
     if scale < 1.0:
@@ -18,11 +35,16 @@ def show_fit(window_name, img, max_dim=900):
     cv2.imshow(window_name, img)
 
 def grad_mag(im):
+    """Return the Sobel gradient-magnitude image of im, used as the signal
+    that alignment is scored on instead of raw pixel intensity."""
     gx = cv2.Sobel(im.astype(np.float64), cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(im.astype(np.float64), cv2.CV_64F, 0, 1, ksize=3)
     return np.sqrt(gx ** 2 + gy ** 2)
 
 def align(im1, im2, metric, window=15):
+    """Exhaustively search integer (dx, dy) shifts of im1 in [-window, window]
+    and return the shifted im1 plus the (dy, dx) shift that best matches im2,
+    scored by L2 distance ("L2") or normalized cross-correlation ("NCC")."""
     best_shift = (0, 0)
     best_score = float('inf') if metric == "L2" else -float('inf')
     shift_range = range(-window, window + 1)
@@ -64,6 +86,14 @@ def align(im1, im2, metric, window=15):
     return np.roll(im1, shift=best_shift, axis=(0, 1)), best_shift
 
 def pyramid_search(im1, im2, metric, scale=None, window=15):
+    """Coarse-to-fine version of align(): downscale im1/im2, find a rough
+    shift with align() at that scale, rescale the shift back to full
+    resolution, apply it, then recurse at the next-finer scale (halving the
+    search window each step) until scale reaches 1. Returns the fully
+    aligned im1 and its total accumulated (dy, dx) shift. Much faster than
+    a brute-force align() on the full-resolution .tif scans, since the
+    search window only ever needs to cover the *residual* misalignment left
+    after each coarser level."""
     if scale is None:
         # pick a starting (coarsest) scale so that level isn't degenerately
         # tiny on small images, but never coarser than 1/16 (tuned for the
@@ -87,6 +117,9 @@ def pyramid_search(im1, im2, metric, scale=None, window=15):
         return aligned_final, total_shift
 
 def analyze_single_scale():
+    """Baseline pipeline for the small .jpg scans: split into B/G/R, crop
+    borders, and align G and R onto B with a single-scale brute-force
+    align() (no pyramid needed since these images are already small)."""
     jpgs = ['cathedral.jpg', 'monastery.jpg', 'tobolsk.jpg']
     
     for imname in jpgs:
@@ -118,6 +151,8 @@ def analyze_single_scale():
 CUSTOM_IMAGES = ['beans.jpg', 'ceramic.jpg', 'woman.jpg']
 
 def analyze_multi_scale():
+    """Pyramid-search pipeline for the full data/ set (mainly the large
+    .tif scans), excluding CUSTOM_IMAGES which are handled separately below."""
     imgs = glob.glob('data/*.jpg') + glob.glob('data/*.tif')
     imgs = [f for f in imgs if os.path.basename(f) not in CUSTOM_IMAGES]
     for imname in imgs:
@@ -148,6 +183,8 @@ def analyze_multi_scale():
         cv2.destroyAllWindows()
 
 def analyze_custom_images():
+    """Same pyramid-search pipeline as analyze_multi_scale(), run on the
+    student-chosen extra images (CUSTOM_IMAGES) that were excluded above."""
     for imname in CUSTOM_IMAGES:
         im = cv2.imread(f"data/{imname}", cv2.IMREAD_GRAYSCALE)
 
