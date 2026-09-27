@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project 2 &mdash; Fun with Filters and Frequencies</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="site-name" href="../index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="../index.html">&larr; Portfolio</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">Project 2</span>
+    <h1>Fun with Filters and Frequencies</h1>
+    <p class="intro">
+      Every operation here starts from the same primitive &mdash; 2D
+      convolution &mdash; and builds up from there: finite-difference edges,
+      derivative-of-Gaussian filters, unsharp masking, and finally hybrid
+      images that swap identities depending on how far away you stand from
+      the screen.
+    </p>
+    <div class="meta">
+      <span class="eyebrow">CS 180 &middot; Fall 2026</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <a href="#convolutions">1.1 Convolutions</a>
+    <a href="#finite-diff">1.2 Finite Differences</a>
+    <a href="#dog">1.3 DoG Filters</a>
+    <a href="#sharpening">2.1 Sharpening</a>
+    <a href="#hybrid">2.2 Hybrid Images</a>
+  </nav>
+
+  <section class="section" id="convolutions">
+    <span class="eyebrow">Part 1.1</span>
+    <h2>Convolutions from Scratch</h2>
+    <p class="section-intro">
+      Three implementations of the same zero-padded, kernel-flipped
+      &ldquo;same&rdquo; convolution &mdash; a naive four-nested-loop version,
+      a two-loop version that vectorizes over the kernel window, and
+      <code>scipy.signal.convolve2d</code> as ground truth &mdash; run on a
+      9&times;9 box filter and a pair of finite-difference kernels.
+    </p>
+
+    <div class="compare">
+      <figure>
+        <img src="out/1_1_selfie_original.jpg" alt="Grayscale selfie, original.">
+        <figcaption>Original (960&times;1280)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_1_selfie_box.jpg" alt="Selfie after a 9x9 box blur.">
+        <figcaption>9&times;9 box filter</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/1_1_selfie_dx.jpg" alt="Horizontal derivative of the selfie.">
+        <figcaption>D/Dx, [&minus;1, 0, 1]</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_1_selfie_dy.jpg" alt="Vertical derivative of the selfie.">
+        <figcaption>D/Dy, [&minus;1, 0, 1]<sup>T</sup></figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        <code>np.allclose</code> confirms all three implementations agree
+        exactly. Measured wall-clock time for the 9&times;9 box filter on the
+        960&times;1280 selfie (1,228,800 pixels, 81 taps each):
+      </p>
+      <ul>
+        <li><strong>4 nested loops:</strong> 68.4s</li>
+        <li><strong>2 loops (vectorized kernel window):</strong> 9.6s &mdash; ~7&times; faster</li>
+        <li><strong>scipy.signal.convolve2d:</strong> 0.32s &mdash; ~210&times; faster than 4-loop</li>
+      </ul>
+      <p>
+        The four-loop version pays Python's per-operation overhead
+        <em>H&times;W&times;k<sub>h</sub>&times;k<sub>w</sub></em> times &mdash;
+        almost 100 million individual scalar multiply-adds, each one a full
+        Python bytecode dispatch. Replacing the two innermost loops with a
+        single <code>np.sum(region * kernel)</code> moves that same work into
+        C, leaving only <em>H&times;W</em> Python-level iterations &mdash; a
+        ~7&times; speedup for free. Scipy goes further still: <code>convolve2d</code>
+        is a single compiled call with no per-pixel Python round-trip at all,
+        so it's over two orders of magnitude faster than the naive loop.
+      </p>
+      <p>
+        All three use the same boundary convention &mdash; the image is
+        explicitly zero-padded by <code>(k&minus;1)/2</code> on each side
+        before sliding the kernel (<code>np.pad</code> with
+        <code>constant_values=0</code> in the loop versions,
+        <code>boundary='fill', fillvalue=0</code> in scipy) &mdash; which is
+        why they match pixel-for-pixel. Zero-padding treats everything
+        outside the frame as black, which pulls the blurred result darker
+        near the edges (visible as a faint vignette in the box-filtered
+        selfie above); a <code>reflect</code> or <code>edge</code> boundary
+        would avoid that darkening but no longer matches scipy's default
+        convention exactly.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="finite-diff">
+    <span class="eyebrow">Part 1.2</span>
+    <h2>Finite Difference Operator</h2>
+    <p class="section-intro">
+      Convolving the cameraman with the same [&minus;1, 0, 1] finite-difference
+      kernels gives partial derivatives in x and y; their magnitude locates
+      edges, and thresholding turns that into a binary edge map.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/1_2_cameraman.jpg" alt="Original cameraman image.">
+        <figcaption>Original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_2_dx.jpg" alt="Cameraman partial derivative in x.">
+        <figcaption>&part;/&part;x</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_2_dy.jpg" alt="Cameraman partial derivative in y.">
+        <figcaption>&part;/&part;y</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_2_grad_mag.jpg" alt="Cameraman gradient magnitude.">
+        <figcaption>Gradient magnitude</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_2_binarized_chosen.jpg" alt="Cameraman binarized edge map at threshold 50/255.">
+        <figcaption>Binarized, threshold = 50/255</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/1_2_binarized_low.jpg" alt="Cameraman binarized edge map at a low threshold, showing grass noise.">
+        <figcaption>Threshold = 15/255 &mdash; every real edge survives, but the grass texture in the lower third turns into a field of noisy specks.</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_2_binarized_high.jpg" alt="Cameraman binarized edge map at a high threshold, missing faint edges.">
+        <figcaption>Threshold = 110/255 &mdash; grass noise is gone, but faint edges (the tripod legs, the collar) start to break up.</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        50/255 was chosen as the point that keeps the cameraman, camera, and
+        tripod as continuous outlines while mostly suppressing the
+        high-frequency noise in the grass. A raw finite difference has no
+        notion of scale, so it responds just as strongly to one noisy pixel
+        as to a true object boundary &mdash; there's no threshold that gets
+        a perfectly clean silhouette <em>and</em> a noise-free background
+        from this operator alone, only a tradeoff between the two, which
+        Part 1.3's Gaussian pre-blur addresses directly.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="dog">
+    <span class="eyebrow">Part 1.3</span>
+    <h2>Derivative of Gaussian (DoG) Filters</h2>
+    <p class="section-intro">
+      Blurring before differentiating suppresses exactly the
+      high-frequency noise Part 1.2 struggled with. Convolution is
+      associative, so blur-then-differentiate can be collapsed into a single
+      derivative-of-Gaussian kernel &mdash; the Gaussian pre-convolved with
+      each finite-difference kernel.
+    </p>
+
+    <div class="filmstrip">
+      <img src="out/1_3_kernel_gaussian.png" alt="9x9 Gaussian kernel, sigma 1.5, visualized as a grayscale image.">
+      <img src="out/1_3_kernel_dogx.png" alt="Derivative-of-Gaussian kernel in x, visualized as a grayscale image.">
+      <img src="out/1_3_kernel_dogy.png" alt="Derivative-of-Gaussian kernel in y, visualized as a grayscale image.">
+    </div>
+    <p class="fallback-link">Left to right: the 9&times;9 Gaussian (&sigma;=1.5), DoG/&part;x, DoG/&part;y &mdash; each upsampled with nearest-neighbor so individual taps are visible.</p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/1_3_blurred.jpg" alt="Cameraman after Gaussian blur.">
+        <figcaption>Gaussian-blurred</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_3_blurred_dx.jpg" alt="Blurred cameraman, derivative in x.">
+        <figcaption>Blur then &part;/&part;x</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_3_blurred_dy.jpg" alt="Blurred cameraman, derivative in y.">
+        <figcaption>Blur then &part;/&part;y</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_3_blurred_grad_mag.jpg" alt="Gradient magnitude of the blurred cameraman.">
+        <figcaption>Gradient magnitude</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_3_blurred_binarized.jpg" alt="Binarized edges of the blurred cameraman, threshold 25/255.">
+        <figcaption>Binarized, threshold = 25/255</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/1_3_dogx_direct.jpg" alt="Cameraman convolved directly with the DoG-x kernel.">
+        <figcaption>Single DoG/&part;x convolution</figcaption>
+      </figure>
+      <figure>
+        <img src="out/1_3_dogy_direct.jpg" alt="Cameraman convolved directly with the DoG-y kernel.">
+        <figcaption>Single DoG/&part;y convolution</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        Compared to Part 1.2's raw finite differences, the blurred gradient
+        magnitude is visibly cleaner &mdash; the grass no longer registers
+        as a field of bright specks &mdash; which is why the binarized
+        version here uses a lower threshold (25/255 vs. 50/255) and still
+        comes out less noisy. Blurring trades edge sharpness for noise
+        rejection: fine texture gets smoothed away along with the noise, but
+        the object boundaries that survive are more reliable.
+      </p>
+      <p>
+        Convolving with the single DoG kernel and convolving with the
+        Gaussian then the difference kernel agree almost everywhere &mdash;
+        interior pixels differ by at most ~0.007 (on a [0,1] scale). They're
+        not bit-identical only at the border: two sequential
+        <code>'same'</code>-mode, zero-padded convolutions each introduce
+        their own edge padding, which isn't quite the same as one
+        <code>'same'</code>-mode convolution with the composed kernel, so the
+        outermost few pixels disagree by up to 0.37. Everywhere convolution's
+        associativity actually applies &mdash; away from the border &mdash;
+        the two routes to the same DoG filter land on the same answer.
+      </p>
+    </div>
+
+    <div class="bonus">
+      <span class="eyebrow">Bells &amp; Whistles</span>
+      <h3>Gradient Orientation, Without <code>arctan2</code></h3>
+      <p>
+        Instead of calling an inverse-trig &ldquo;angle&rdquo; function like
+        <code>np.arctan2</code> or <code>cv2.phase</code> directly on
+        (&part;x, &part;y), each pixel's gradient direction is classified by
+        <em>nearest match</em>: build a table of 360 reference unit vectors
+        from <code>cos</code>/<code>sin</code> of known angles (forward
+        trig, not angle recovery), normalize every pixel's (&part;x, &part;y)
+        to a unit vector, and take the reference angle whose dot product
+        with it is largest. No inverse-trig call ever touches the gradient
+        itself &mdash; the angle comes out as an index into a lookup table.
+      </p>
+      <div class="compare">
+        <figure>
+          <img src="out/1_bonus_orientation.jpg" alt="Cameraman gradient orientation visualized as a hue wheel, saturated by gradient magnitude.">
+          <figcaption>Hue = orientation, value = gradient magnitude</figcaption>
+        </figure>
+        <figure>
+          <img src="out/1_bonus_wheel.jpg" alt="Legend: a color wheel mapping hue to orientation angle.">
+          <figcaption>Hue legend (0&ndash;360&deg;, built with the same nearest-match method)</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="sharpening">
+    <span class="eyebrow">Part 2.1</span>
+    <h2>Image &ldquo;Sharpening&rdquo;</h2>
+    <p class="section-intro">
+      Unsharp masking boosts high frequencies by subtracting a blurred copy
+      from the original to isolate the high-frequency residual, then adding
+      a scaled copy of that residual back on top: a single convolution with
+      <code>(1&#8201;+&#8201;a)&middot;impulse &minus; a&middot;gaussian</code>.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_1_taj_original.jpg" alt="Original Taj Mahal photo.">
+        <figcaption>Taj Mahal &mdash; original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_taj_blurred.jpg" alt="Taj Mahal after Gaussian blur.">
+        <figcaption>Blurred (&sigma;=2)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_taj_highfreq.jpg" alt="High-frequency residual of the Taj Mahal photo, offset for display.">
+        <figcaption>High-frequency residual (original &minus; blurred, +0.5 for display)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_taj_sharp.jpg" alt="Sharpened Taj Mahal photo, a=5.">
+        <figcaption>Unsharp masked (a=5)</figcaption>
+      </figure>
+    </div>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_1_red_original.jpg" alt="Original Angry Birds Red meme photo.">
+        <figcaption>Red &mdash; original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_blurred.jpg" alt="Red photo after Gaussian blur.">
+        <figcaption>Blurred (&sigma;=2)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_highfreq.jpg" alt="High-frequency residual of the Red photo, offset for display.">
+        <figcaption>High-frequency residual (+0.5 for display)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_sharp.jpg" alt="Sharpened Red photo, a=5.">
+        <figcaption>Unsharp masked (a=5)</figcaption>
+      </figure>
+    </div>
+
+    <p class="section-intro">
+      Red was picked as the second image because it's flat, saturated
+      cartoon color instead of a photograph &mdash; almost all of its
+      &ldquo;edges&rdquo; are hard boundaries between two solid colors, which
+      makes unsharp masking's halo/ringing behavior much easier to see than
+      on a photographic source like the Taj Mahal.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_1_red_a1.jpg" alt="Red sharpened with a=1.">
+        <figcaption>a = 1</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_a3.jpg" alt="Red sharpened with a=3.">
+        <figcaption>a = 3</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_a6.jpg" alt="Red sharpened with a=6.">
+        <figcaption>a = 6</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_red_a10.jpg" alt="Red sharpened with a=10, showing strong ringing artifacts.">
+        <figcaption>a = 10 &mdash; visible halos along every flat-color boundary</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        The blurred copy keeps only an image's low frequencies; subtracting
+        it from the original leaves just the high-frequency residual &mdash;
+        edges, texture, noise. Unsharp masking adds <code>a</code> extra
+        copies of that residual back onto the original, so edges get a
+        brighter bright side and a darker dark side without touching the
+        smooth regions the residual is near-zero in. As <code>a</code> grows
+        the effect stops looking like sharpening and starts looking like
+        edge ringing &mdash; visible as a bright/dark halo tracing every
+        flat-color boundary on Red (the black eyebrows, the beak, the ear)
+        by <code>a=10</code>, since the filter is boosting a band of
+        frequencies, not literally adding resolution that was never
+        captured.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="hybrid">
+    <span class="eyebrow">Part 2.2</span>
+    <h2>Hybrid Images</h2>
+    <p class="section-intro">
+      A hybrid image low-pass filters one aligned photo and high-pass
+      filters another, then sums them: up close the high frequencies (fine
+      detail, edges) dominate perception, but squint or step back and the
+      low frequencies (coarse shape) take over instead. Alignment (center,
+      scale, rotation) comes from two corresponding points picked in each
+      image &mdash; here, both eyes.
+    </p>
+
+    <h3>Derek + Nutmeg &mdash; full process</h3>
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_derek_nutmeg_low_original.jpg" alt="Original photo of Derek.">
+        <figcaption>Derek (original) &mdash; low-frequency image</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_high_original.jpg" alt="Original photo of Nutmeg the cat.">
+        <figcaption>Nutmeg (original) &mdash; high-frequency image</figcaption>
+      </figure>
+    </div>
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_derek_nutmeg_low_aligned.jpg" alt="Derek's photo after alignment to Nutmeg's eye positions.">
+        <figcaption>Derek, aligned</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_high_aligned.jpg" alt="Nutmeg's photo after alignment.">
+        <figcaption>Nutmeg, aligned</figcaption>
+      </figure>
+    </div>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_2_derek_nutmeg_fft_low_input.jpg" alt="FFT log-magnitude spectrum of the aligned Derek image.">
+        <figcaption>FFT &mdash; Derek (aligned input)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_fft_high_input.jpg" alt="FFT log-magnitude spectrum of the aligned Nutmeg image.">
+        <figcaption>FFT &mdash; Nutmeg (aligned input)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_fft_low_pass.jpg" alt="FFT log-magnitude spectrum of the low-passed Derek image.">
+        <figcaption>FFT &mdash; Derek, low-passed</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_fft_high_pass.jpg" alt="FFT log-magnitude spectrum of the high-passed Nutmeg image.">
+        <figcaption>FFT &mdash; Nutmeg, high-passed</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_fft_hybrid.jpg" alt="FFT log-magnitude spectrum of the final hybrid image.">
+        <figcaption>FFT &mdash; hybrid</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_derek_nutmeg_low_pass.jpg" alt="Derek's aligned photo, low-pass filtered.">
+        <figcaption>Low-passed Derek (&sigma;=10)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_derek_nutmeg_high_pass.jpg" alt="Nutmeg's aligned photo, high-pass filtered, offset for display.">
+        <figcaption>High-passed Nutmeg (&sigma;=5, +0.5 for display)</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature">
+      <img src="out/2_2_derek_nutmeg_hybrid.jpg" alt="Final hybrid image of Derek and Nutmeg, showing Nutmeg's sharp detail up close and Derek's face when viewed small.">
+      <figcaption>The hybrid &mdash; Nutmeg's whiskers dominate up close; shrink this image (or step back) and Derek's face takes over.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Cutoff frequencies (&sigma;<sub>low</sub>=10 for Derek, &sigma;<sub>high</sub>=5
+        for Nutmeg, working at a common ~520px-tall resolution) were chosen
+        by trial and error against the strength of the illusion: too low a
+        &sigma; on Derek and his sharp facial edges compete with Nutmeg's for
+        attention up close; too high a &sigma; on Nutmeg's high-pass and its
+        residual gets so faint the fine cat detail disappears even at close
+        range. Unlike the notebook's fixed 9-tap kernel, this kernel's size
+        scales with &sigma; (the same <code>2&middot;ceil(3&sigma;)+1</code>
+        rule used for the Gaussian/Laplacian stacks later in the notebook),
+        since a fixed 9&times;9 kernel can't actually deliver a &sigma;=10
+        blur &mdash; it just gets truncated. The FFT spectra confirm the
+        intent: Derek's low-passed spectrum concentrates energy near the
+        origin (low frequencies), Nutmeg's high-passed spectrum is hollowed
+        out at the center, and the hybrid's spectrum is essentially their
+        sum.
+      </p>
+    </div>
+
+    <h3>Speed + Speed Smile</h3>
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_speed_low_original.jpg" alt="Original photo, Speed grimacing.">
+        <figcaption>Original &mdash; low-frequency image</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_speed_high_original.jpg" alt="Original photo, Speed smiling.">
+        <figcaption>Original &mdash; high-frequency image</figcaption>
+      </figure>
+    </div>
+    <figure class="feature">
+      <img src="out/2_2_speed_hybrid.jpg" alt="Hybrid image combining the two Speed photos.">
+      <figcaption>Hybrid (&sigma;<sub>low</sub>=1.5, &sigma;<sub>high</sub>=3) &mdash; at this &sigma;<sub>low</sub>, the grimace barely gets blurred at all, so its own edges stay sharp enough to dominate the composite at every viewing distance &mdash; the smile's high-passed detail doesn't get a real chance to read even from far away.</figcaption>
+    </figure>
+
+    <h3>Landscape + Josh</h3>
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_landscape_josh_low_original.jpg" alt="Original portrait photo of Josh.">
+        <figcaption>Original &mdash; low-frequency image</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_high_original.jpg" alt="Original photo of a hilltop village.">
+        <figcaption>Original &mdash; high-frequency image</figcaption>
+      </figure>
+    </div>
+    <figure class="feature">
+      <img src="out/2_2_landscape_josh_hybrid.jpg" alt="Hybrid image combining Josh's portrait and the village landscape.">
+      <figcaption>Hybrid (&sigma;<sub>low</sub>=3, &sigma;<sub>high</sub>=5) &mdash; roles flipped from the pair above: Josh is now the low-frequency base and the village the high-frequency detail, so the village's rooftops and streets dominate up close, and Josh's face emerges once the image is shrunk or viewed from a distance.</figcaption>
+    </figure>
+  </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <a href="../index.html">&larr; Back to portfolio</a>
+  </footer>
+
+</body>
+</html>
