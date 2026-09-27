@@ -52,6 +52,18 @@ def normalize_for_display(im):
     return im.astype(np.uint8)
 
 
+def normalize_signed_for_display(im):
+    """Map a signed derivative to a grey display: 0 -> mid-grey (128),
+    scaled symmetrically by the largest-magnitude value so sign survives --
+    unlike normalize_for_display's np.abs(), which maps both a rising and a
+    falling edge to the same bright value and flattens everything else to
+    black."""
+    m = np.abs(im).max()
+    if m > 0:
+        im = im / m * 127.0
+    return np.clip(im + 128.0, 0, 255).astype(np.uint8)
+
+
 # --------------------------------------------------------------------------
 # Part 1.1: convolutions from scratch
 # --------------------------------------------------------------------------
@@ -110,8 +122,8 @@ def part1_1():
 
     save01('1_1_selfie_original.jpg', im_selfie)
     save01('1_1_selfie_box.jpg', im_2loops)
-    save01('1_1_selfie_dx.jpg', normalize_for_display(im_dx) / 255.0)
-    save01('1_1_selfie_dy.jpg', normalize_for_display(im_dy) / 255.0)
+    save01('1_1_selfie_dx.jpg', normalize_signed_for_display(im_dx) / 255.0)
+    save01('1_1_selfie_dy.jpg', normalize_signed_for_display(im_dy) / 255.0)
 
     return dict(t_4=t_4, t_2=t_2, t_s=t_s, match=match, shape=im_selfie.shape)
 
@@ -130,8 +142,8 @@ def part1_2():
     im_grad_mag = np.sqrt(im_dx ** 2 + im_dy ** 2)
 
     save01('1_2_cameraman.jpg', im_cameraman)
-    save01('1_2_dx.jpg', normalize_for_display(im_dx) / 255.0)
-    save01('1_2_dy.jpg', normalize_for_display(im_dy) / 255.0)
+    save01('1_2_dx.jpg', normalize_signed_for_display(im_dx) / 255.0)
+    save01('1_2_dy.jpg', normalize_signed_for_display(im_dy) / 255.0)
     save01('1_2_grad_mag.jpg', normalize_for_display(im_grad_mag) / 255.0)
 
     for thresh, label in [(15, 'low'), (50, 'chosen'), (110, 'high')]:
@@ -181,64 +193,14 @@ def part1_3(im_cameraman, im_dx, im_dy, im_grad_mag):
     print('blur-then-diff == single DoG conv:', two_step_match)
 
     save01('1_3_blurred.jpg', im_blurred)
-    save01('1_3_blurred_dx.jpg', normalize_for_display(im_blurred_dx) / 255.0)
-    save01('1_3_blurred_dy.jpg', normalize_for_display(im_blurred_dy) / 255.0)
+    save01('1_3_blurred_dx.jpg', normalize_signed_for_display(im_blurred_dx) / 255.0)
+    save01('1_3_blurred_dy.jpg', normalize_signed_for_display(im_blurred_dy) / 255.0)
     save01('1_3_blurred_grad_mag.jpg', normalize_for_display(im_blurred_grad_mag) / 255.0)
     save01('1_3_blurred_binarized.jpg', binarized_blurred)
-    save01('1_3_dogx_direct.jpg', normalize_for_display(im_dogx_direct) / 255.0)
-    save01('1_3_dogy_direct.jpg', normalize_for_display(im_dogy_direct) / 255.0)
+    save01('1_3_dogx_direct.jpg', normalize_signed_for_display(im_dogx_direct) / 255.0)
+    save01('1_3_dogy_direct.jpg', normalize_signed_for_display(im_dogy_direct) / 255.0)
 
     return two_step_match
-
-
-# --------------------------------------------------------------------------
-# Bells & whistles: gradient orientation without arctan2 / cv2.phase
-# --------------------------------------------------------------------------
-
-def manual_gradient_orientation(dx, dy, n_bins=360):
-    """Classify each pixel's (dx, dy) direction by nearest-angle match
-    against a table of reference unit vectors built from sin/cos of known
-    angles, instead of calling an inverse-trig 'angle' function like
-    np.arctan2 or cv2.phase directly on (dx, dy)."""
-    mag = np.sqrt(dx ** 2 + dy ** 2)
-    safe_mag = np.where(mag > 1e-8, mag, 1.0)
-    ux = (dx / safe_mag).ravel()
-    uy = (dy / safe_mag).ravel()
-
-    angles = np.arange(n_bins) * (2 * np.pi / n_bins)
-    ref = np.stack([np.cos(angles), np.sin(angles)], axis=1)  # (n_bins, 2)
-
-    pixel_vecs = np.stack([ux, uy], axis=1)  # (N, 2)
-    dots = pixel_vecs @ ref.T  # (N, n_bins)
-    best_bin = np.argmax(dots, axis=1)
-    orientation_deg = (best_bin * (360.0 / n_bins)).reshape(dx.shape)
-    orientation_deg[mag <= 1e-8] = 0
-    return orientation_deg, mag
-
-
-def part1_bonus(im_dx, im_dy):
-    print('=== Bells & whistles: gradient orientation ===')
-    orientation_deg, mag = manual_gradient_orientation(im_dx, im_dy)
-    mag_norm = mag / (mag.max() + 1e-8)
-
-    hsv = np.zeros((*orientation_deg.shape, 3), dtype=np.uint8)
-    hsv[..., 0] = (orientation_deg / 2).astype(np.uint8)  # OpenCV hue in [0,179]
-    hsv[..., 1] = 255
-    hsv[..., 2] = (np.clip(mag_norm * 3, 0, 1) * 255).astype(np.uint8)
-    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-    cv2.imwrite(os.path.join(OUT, '1_bonus_orientation.jpg'), bgr)
-
-    # small hue legend wheel
-    size = 200
-    yy, xx = np.mgrid[0:size, 0:size] - size / 2
-    r = np.sqrt(xx ** 2 + yy ** 2)
-    wheel_orientation, _ = manual_gradient_orientation(xx, -yy)
-    wheel_hsv = np.zeros((size, size, 3), dtype=np.uint8)
-    wheel_hsv[..., 0] = (wheel_orientation / 2).astype(np.uint8)
-    wheel_hsv[..., 1] = 255
-    wheel_hsv[..., 2] = np.where(r <= size / 2, 255, 0).astype(np.uint8)
-    wheel_bgr = cv2.cvtColor(wheel_hsv, cv2.COLOR_HSV2BGR)
-    cv2.imwrite(os.path.join(OUT, '1_bonus_wheel.jpg'), wheel_bgr)
 
 
 # --------------------------------------------------------------------------
@@ -264,18 +226,34 @@ def part2_1():
     im_taj = load_color('taj.jpg')
     im_red = load_color('red.jpg')
 
-    for name, im in [('taj', im_taj), ('red', im_red)]:
-        blurred = gaussian_blur_color(im, sigma=2.0)
-        high_freq = np.clip(im - blurred + 0.5, 0, 1)
-        sharp = unsharp(im, a=5, sigma=2.0)
-        save01(f'2_1_{name}_original.jpg', im)
-        save01(f'2_1_{name}_blurred.jpg', blurred)
-        save01(f'2_1_{name}_highfreq.jpg', high_freq)
-        save01(f'2_1_{name}_sharp.jpg', sharp)
+    im_red_blurred = gaussian_blur_color(im_red, sigma=2.0)
+    im_red_highfreq = np.clip(im_red - im_red_blurred + 0.5, 0, 1)
+    im_red_sharp = unsharp(im_red, a=5, sigma=2.0)
+    save01('2_1_red_original.jpg', im_red)
+    save01('2_1_red_blurred.jpg', im_red_blurred)
+    save01('2_1_red_highfreq.jpg', im_red_highfreq)
+    save01('2_1_red_sharp.jpg', im_red_sharp)
+
+    im_taj_blurred = gaussian_blur_color(im_taj, sigma=2.0)
+    im_taj_highfreq = np.clip(im_taj - im_taj_blurred + 0.5, 0, 1)
+    im_taj_sharp = unsharp(im_taj, a=5, sigma=2.0)
+    save01('2_1_taj_original.jpg', im_taj)
+    save01('2_1_taj_blurred.jpg', im_taj_blurred)
+    save01('2_1_taj_highfreq.jpg', im_taj_highfreq)
+    save01('2_1_taj_sharp.jpg', im_taj_sharp)
 
     for a in [1, 3, 6, 10]:
-        sharp = unsharp(im_red, a=a, sigma=2.0)
-        save01(f'2_1_red_a{a}.jpg', sharp)
+        save01(f'2_1_red_a{a}.jpg', unsharp(im_red, a=a, sigma=2.0))
+
+    # Evaluation: blur a sharp image, then run the same unsharp filter on
+    # the blurred version and see how much of the original detail it
+    # actually recovers.
+    im_sunset = load_color('sunset.jpg')
+    im_sunset_blurred = gaussian_blur_color(im_sunset, sigma=2.0)
+    im_sunset_reconstruct = unsharp(im_sunset_blurred, a=5, sigma=2.0)
+    save01('2_1_sunset_original.jpg', im_sunset)
+    save01('2_1_sunset_blurred.jpg', im_sunset_blurred)
+    save01('2_1_sunset_reconstruct.jpg', im_sunset_reconstruct)
 
 
 # --------------------------------------------------------------------------
@@ -463,7 +441,8 @@ def run_hybrid_pair(name, a_name, a_pts, b_name, b_pts, low_source, sigma_low, s
 
 
 def part2_2():
-    # Derek + Nutmeg -- required pair, shown with the full process.
+    # Derek + Nutmeg -- required pair, shown as originals + final hybrid only
+    # (the "favorite result" with the full process is Landscape + Josh below).
     # notebook: align_images(nutmeg, derek) -- nutmeg (background margin to
     # spare) absorbs the rotation instead of Derek's edge-to-edge headshot.
     # hybrid_image(derek_aligned, nutmeg_aligned, sigma1=10.0, sigma2=5.0):
@@ -471,7 +450,7 @@ def part2_2():
     derek_pts = ((293, 339), (441, 331))     # left eye, right eye
     nutmeg_pts = ((608, 283), (755, 357))    # cat's left eye, cat's right eye
     run_hybrid_pair('derek_nutmeg', 'nutmeg.jpg', nutmeg_pts, 'DerekPicture.jpg', derek_pts,
-                     low_source='b', sigma_low=10.0, sigma_high=5.0, full_process=True)
+                     low_source='b', sigma_low=10.0, sigma_high=5.0)
 
     # Speed + Speed Smile. notebook: align_images(speed, speed_smile);
     # hybrid_image(speed_aligned, speed_smile_aligned, sigma1=1.5, sigma2=3)
@@ -481,22 +460,22 @@ def part2_2():
     run_hybrid_pair('speed', 'speed.jpg', speed_pts, 'speed_smile.jpg', speed_smile_pts,
                      low_source='a', sigma_low=1.5, sigma_high=3.0)
 
-    # Landscape + Josh. notebook: align_images(landscape, josh) -- landscape
-    # absorbs the rotation -- but hybrid_image(josh_aligned,
-    # landscape_aligned, sigma1=3, sigma2=5) makes JOSH the low-frequency
-    # base and LANDSCAPE the high-frequency detail (inverted from the
-    # alignment roles, and from the stale comment in the notebook).
+    # Landscape + Josh -- favorite result, shown with the full process.
+    # notebook: align_images(landscape, josh) -- landscape absorbs the
+    # rotation -- but hybrid_image(josh_aligned, landscape_aligned,
+    # sigma1=3, sigma2=5) makes JOSH the low-frequency base and LANDSCAPE
+    # the high-frequency detail (inverted from the alignment roles, and
+    # from the stale comment in the notebook).
     landscape_pts = ((204, 316), (521, 296))
     josh_pts = ((172, 133), (310, 116))
     run_hybrid_pair('landscape_josh', 'landscape.jpg', landscape_pts, 'josh.jpg', josh_pts,
-                     low_source='b', sigma_low=3.0, sigma_high=5.0)
+                     low_source='b', sigma_low=3.0, sigma_high=5.0, full_process=True)
 
 
 if __name__ == '__main__':
     timing = part1_1()
     im_cameraman, im_dx, im_dy, im_grad_mag = part1_2()
     two_step_match = part1_3(im_cameraman, im_dx, im_dy, im_grad_mag)
-    part1_bonus(im_dx, im_dy)
     part2_1()
     part2_2()
     print('\nDone. timing =', timing, 'two_step_match =', two_step_match)

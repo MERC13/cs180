@@ -54,6 +54,39 @@
       9&times;9 box filter and a pair of finite-difference kernels.
     </p>
 
+    <pre class="code-block"><code>def convolve_4loops(im, kernel):
+    img_h, img_w = im.shape
+    ker_h, ker_w = kernel.shape
+    kernel = np.flipud(np.fliplr(kernel))
+    pad_h = (ker_h - 1) // 2
+    pad_w = (ker_w - 1) // 2
+    padded_im = np.pad(im, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+
+    output = np.zeros((img_h, img_w))
+    for x in range(img_h):
+        for y in range(img_w):
+            for i in range(ker_h):
+                for j in range(ker_w):
+                    output[x, y] += padded_im[x + i, y + j] * kernel[i, j]
+
+    return output</code></pre>
+
+    <pre class="code-block"><code>def convolve_2loops(im, kernel):
+    img_h, img_w = im.shape
+    ker_h, ker_w = kernel.shape
+    kernel = np.flipud(np.fliplr(kernel))
+    pad_h = (ker_h - 1) // 2
+    pad_w = (ker_w - 1) // 2
+    padded_im = np.pad(im, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+
+    output = np.zeros((img_h, img_w))
+    for x in range(img_h):
+        for y in range(img_w):
+            region = padded_im[x:x + ker_h, y:y + ker_w]
+            output[x, y] = np.sum(region * kernel)
+
+    return output</code></pre>
+
     <div class="compare">
       <figure>
         <img src="out/1_1_selfie_original.jpg" alt="Grayscale selfie, original.">
@@ -247,31 +280,6 @@
       </p>
     </div>
 
-    <div class="bonus">
-      <span class="eyebrow">Bells &amp; Whistles</span>
-      <h3>Gradient Orientation, Without <code>arctan2</code></h3>
-      <p>
-        Instead of calling an inverse-trig &ldquo;angle&rdquo; function like
-        <code>np.arctan2</code> or <code>cv2.phase</code> directly on
-        (&part;x, &part;y), each pixel's gradient direction is classified by
-        <em>nearest match</em>: build a table of 360 reference unit vectors
-        from <code>cos</code>/<code>sin</code> of known angles (forward
-        trig, not angle recovery), normalize every pixel's (&part;x, &part;y)
-        to a unit vector, and take the reference angle whose dot product
-        with it is largest. No inverse-trig call ever touches the gradient
-        itself &mdash; the angle comes out as an index into a lookup table.
-      </p>
-      <div class="compare">
-        <figure>
-          <img src="out/1_bonus_orientation.jpg" alt="Cameraman gradient orientation visualized as a hue wheel, saturated by gradient magnitude.">
-          <figcaption>Hue = orientation, value = gradient magnitude</figcaption>
-        </figure>
-        <figure>
-          <img src="out/1_bonus_wheel.jpg" alt="Legend: a color wheel mapping hue to orientation angle.">
-          <figcaption>Hue legend (0&ndash;360&deg;, built with the same nearest-match method)</figcaption>
-        </figure>
-      </div>
-    </div>
   </section>
 
   <section class="section" id="sharpening">
@@ -295,7 +303,7 @@
       </figure>
       <figure>
         <img src="out/2_1_taj_highfreq.jpg" alt="High-frequency residual of the Taj Mahal photo, offset for display.">
-        <figcaption>High-frequency residual (original &minus; blurred, +0.5 for display)</figcaption>
+        <figcaption>High frequency (original &minus; blurred, +0.5 for display)</figcaption>
       </figure>
       <figure>
         <img src="out/2_1_taj_sharp.jpg" alt="Sharpened Taj Mahal photo, a=5.">
@@ -314,7 +322,7 @@
       </figure>
       <figure>
         <img src="out/2_1_red_highfreq.jpg" alt="High-frequency residual of the Red photo, offset for display.">
-        <figcaption>High-frequency residual (+0.5 for display)</figcaption>
+        <figcaption>High frequency (+0.5 for display)</figcaption>
       </figure>
       <figure>
         <img src="out/2_1_red_sharp.jpg" alt="Sharpened Red photo, a=5.">
@@ -365,6 +373,44 @@
         captured.
       </p>
     </div>
+
+    <h3>Evaluation: blur a sharp image, then try to sharpen it back</h3>
+    <p>
+      A more direct test of what the filter can and can't recover: take a
+      sharp image, blur it, then run the exact same unsharp mask on the
+      blurred result and compare it against the untouched original.
+    </p>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_1_sunset_original.jpg" alt="Original photo of a palm frond silhouetted against a sunset.">
+        <figcaption>Original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_sunset_blurred.jpg" alt="Sunset photo after Gaussian blur.">
+        <figcaption>Blurred (&sigma;=2)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_1_sunset_reconstruct.jpg" alt="Blurred sunset photo after unsharp masking, showing ringing on the fine palm frond tips.">
+        <figcaption>Reconstructed (unsharp masked, a=5)</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        Blurring and unsharp-masking are not inverses of each other &mdash;
+        a Gaussian blur genuinely discards information (a low-pass filter
+        has no exact inverse), so no amount of unsharp masking gets the
+        finest palm-frond tips back exactly as they were. What it does
+        instead is boost contrast along whatever edges survived the blur,
+        which reads as &ldquo;sharper&rdquo; at a glance but leaves visible
+        ringing right where the finest detail used to be &mdash; compare the
+        frond tips in the reconstruction to the crisp original above: the
+        thickest fronds recover their edges reasonably well, but the
+        thinnest ones come back as faint double lines rather than single
+        sharp strands.
+      </p>
+    </div>
   </section>
 
   <section class="section" id="hybrid">
@@ -379,7 +425,7 @@
       image &mdash; here, both eyes.
     </p>
 
-    <h3>Derek + Nutmeg &mdash; full process</h3>
+    <h3>Derek + Nutmeg</h3>
     <div class="compare">
       <figure>
         <img src="out/2_2_derek_nutmeg_low_original.jpg" alt="Original photo of Derek.">
@@ -390,75 +436,10 @@
         <figcaption>Nutmeg (original) &mdash; high-frequency image</figcaption>
       </figure>
     </div>
-    <div class="compare">
-      <figure>
-        <img src="out/2_2_derek_nutmeg_low_aligned.jpg" alt="Derek's photo after alignment to Nutmeg's eye positions.">
-        <figcaption>Derek, aligned</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_high_aligned.jpg" alt="Nutmeg's photo after alignment.">
-        <figcaption>Nutmeg, aligned</figcaption>
-      </figure>
-    </div>
-
-    <div class="gallery">
-      <figure>
-        <img src="out/2_2_derek_nutmeg_fft_low_input.jpg" alt="FFT log-magnitude spectrum of the aligned Derek image.">
-        <figcaption>FFT &mdash; Derek (aligned input)</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_fft_high_input.jpg" alt="FFT log-magnitude spectrum of the aligned Nutmeg image.">
-        <figcaption>FFT &mdash; Nutmeg (aligned input)</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_fft_low_pass.jpg" alt="FFT log-magnitude spectrum of the low-passed Derek image.">
-        <figcaption>FFT &mdash; Derek, low-passed</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_fft_high_pass.jpg" alt="FFT log-magnitude spectrum of the high-passed Nutmeg image.">
-        <figcaption>FFT &mdash; Nutmeg, high-passed</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_fft_hybrid.jpg" alt="FFT log-magnitude spectrum of the final hybrid image.">
-        <figcaption>FFT &mdash; hybrid</figcaption>
-      </figure>
-    </div>
-
-    <div class="compare">
-      <figure>
-        <img src="out/2_2_derek_nutmeg_low_pass.jpg" alt="Derek's aligned photo, low-pass filtered.">
-        <figcaption>Low-passed Derek (&sigma;=10)</figcaption>
-      </figure>
-      <figure>
-        <img src="out/2_2_derek_nutmeg_high_pass.jpg" alt="Nutmeg's aligned photo, high-pass filtered, offset for display.">
-        <figcaption>High-passed Nutmeg (&sigma;=5, +0.5 for display)</figcaption>
-      </figure>
-    </div>
-
     <figure class="feature">
       <img src="out/2_2_derek_nutmeg_hybrid.jpg" alt="Final hybrid image of Derek and Nutmeg, showing Nutmeg's sharp detail up close and Derek's face when viewed small.">
-      <figcaption>The hybrid &mdash; Nutmeg's whiskers dominate up close; shrink this image (or step back) and Derek's face takes over.</figcaption>
+      <figcaption>Hybrid (&sigma;<sub>low</sub>=10 for Derek, &sigma;<sub>high</sub>=5 for Nutmeg) &mdash; Nutmeg's whiskers dominate up close; shrink this image (or step back) and Derek's face takes over.</figcaption>
     </figure>
-
-    <div class="reflection">
-      <p>
-        Cutoff frequencies (&sigma;<sub>low</sub>=10 for Derek, &sigma;<sub>high</sub>=5
-        for Nutmeg, working at a common ~520px-tall resolution) were chosen
-        by trial and error against the strength of the illusion: too low a
-        &sigma; on Derek and his sharp facial edges compete with Nutmeg's for
-        attention up close; too high a &sigma; on Nutmeg's high-pass and its
-        residual gets so faint the fine cat detail disappears even at close
-        range. Unlike the notebook's fixed 9-tap kernel, this kernel's size
-        scales with &sigma; (the same <code>2&middot;ceil(3&sigma;)+1</code>
-        rule used for the Gaussian/Laplacian stacks later in the notebook),
-        since a fixed 9&times;9 kernel can't actually deliver a &sigma;=10
-        blur &mdash; it just gets truncated. The FFT spectra confirm the
-        intent: Derek's low-passed spectrum concentrates energy near the
-        origin (low frequencies), Nutmeg's high-passed spectrum is hollowed
-        out at the center, and the hybrid's spectrum is essentially their
-        sum.
-      </p>
-    </div>
 
     <h3>Speed + Speed Smile</h3>
     <div class="compare">
@@ -476,21 +457,86 @@
       <figcaption>Hybrid (&sigma;<sub>low</sub>=1.5, &sigma;<sub>high</sub>=3) &mdash; at this &sigma;<sub>low</sub>, the grimace barely gets blurred at all, so its own edges stay sharp enough to dominate the composite at every viewing distance &mdash; the smile's high-passed detail doesn't get a real chance to read even from far away.</figcaption>
     </figure>
 
-    <h3>Landscape + Josh</h3>
+    <h3>Landscape + Josh &mdash; favorite result, full process</h3>
     <div class="compare">
       <figure>
         <img src="out/2_2_landscape_josh_low_original.jpg" alt="Original portrait photo of Josh.">
-        <figcaption>Original &mdash; low-frequency image</figcaption>
+        <figcaption>Josh (original) &mdash; low-frequency image</figcaption>
       </figure>
       <figure>
         <img src="out/2_2_landscape_josh_high_original.jpg" alt="Original photo of a hilltop village.">
-        <figcaption>Original &mdash; high-frequency image</figcaption>
+        <figcaption>Landscape (original) &mdash; high-frequency image</figcaption>
       </figure>
     </div>
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_landscape_josh_low_aligned.jpg" alt="Josh's photo after alignment to the landscape's reference points.">
+        <figcaption>Josh, aligned</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_high_aligned.jpg" alt="Landscape photo after alignment.">
+        <figcaption>Landscape, aligned</figcaption>
+      </figure>
+    </div>
+
+    <div class="gallery">
+      <figure>
+        <img src="out/2_2_landscape_josh_fft_low_input.jpg" alt="FFT log-magnitude spectrum of the aligned Josh image.">
+        <figcaption>FFT &mdash; Josh (aligned input)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_fft_high_input.jpg" alt="FFT log-magnitude spectrum of the aligned landscape image.">
+        <figcaption>FFT &mdash; Landscape (aligned input)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_fft_low_pass.jpg" alt="FFT log-magnitude spectrum of the low-passed Josh image.">
+        <figcaption>FFT &mdash; Josh, low-passed</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_fft_high_pass.jpg" alt="FFT log-magnitude spectrum of the high-passed landscape image.">
+        <figcaption>FFT &mdash; Landscape, high-passed</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_fft_hybrid.jpg" alt="FFT log-magnitude spectrum of the final hybrid image.">
+        <figcaption>FFT &mdash; hybrid</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/2_2_landscape_josh_low_pass.jpg" alt="Josh's aligned photo, low-pass filtered.">
+        <figcaption>Low-passed Josh (&sigma;=3)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_2_landscape_josh_high_pass.jpg" alt="Landscape photo, high-pass filtered, offset for display.">
+        <figcaption>High-passed Landscape (&sigma;=5, +0.5 for display)</figcaption>
+      </figure>
+    </div>
+
     <figure class="feature">
       <img src="out/2_2_landscape_josh_hybrid.jpg" alt="Hybrid image combining Josh's portrait and the village landscape.">
-      <figcaption>Hybrid (&sigma;<sub>low</sub>=3, &sigma;<sub>high</sub>=5) &mdash; roles flipped from the pair above: Josh is now the low-frequency base and the village the high-frequency detail, so the village's rooftops and streets dominate up close, and Josh's face emerges once the image is shrunk or viewed from a distance.</figcaption>
+      <figcaption>The hybrid &mdash; the village's rooftops and streets dominate up close; shrink this image (or step back) and Josh's face takes over.</figcaption>
     </figure>
+
+    <div class="reflection">
+      <p>
+        Cutoff frequencies (&sigma;<sub>low</sub>=3 for Josh, &sigma;<sub>high</sub>=5
+        for the landscape) were chosen by trial and error against the
+        strength of the illusion: too low a &sigma; on Josh and his own
+        facial edges compete with the village's rooftops for attention up
+        close (the same failure mode visible in the Speed pair above, at
+        &sigma;=1.5); too high a &sigma; on the landscape's high-pass and its
+        residual gets so faint the streets and rooftops disappear even at
+        close range. The kernel size scales with &sigma; (the same
+        <code>2&middot;ceil(3&sigma;)+1</code> rule used for the
+        Gaussian/Laplacian stacks later in the notebook) rather than staying
+        fixed, so the blur is real rather than truncated by too small a
+        kernel. The FFT spectra confirm the intent: Josh's low-passed
+        spectrum concentrates energy near the origin (low frequencies), the
+        landscape's high-passed spectrum is hollowed out at the center, and
+        the hybrid's spectrum is essentially their sum.
+      </p>
+    </div>
   </section>
 
   </main>
