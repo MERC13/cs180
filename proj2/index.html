@@ -26,9 +26,11 @@
     <p class="intro">
       Every operation here starts from the same primitive &mdash; 2D
       convolution &mdash; and builds up from there: finite-difference edges,
-      derivative-of-Gaussian filters, unsharp masking, and finally hybrid
-      images that swap identities depending on how far away you stand from
-      the screen.
+      derivative-of-Gaussian filters, unsharp masking, hybrid images that
+      swap identities depending on how far away you stand from the screen,
+      and multiresolution blending that stitches two images together with
+      no visible seam by working frequency band by frequency band instead
+      of pixel by pixel.
     </p>
     <div class="meta">
       <span class="eyebrow">CS 180 &middot; Fall 2026</span>
@@ -41,6 +43,9 @@
     <a href="#dog">1.3 DoG Filters</a>
     <a href="#sharpening">2.1 Sharpening</a>
     <a href="#hybrid">2.2 Hybrid Images</a>
+    <a href="#stacks">2.3 Gaussian/Laplacian Stacks</a>
+    <a href="#blending">2.4 Multiresolution Blending</a>
+    <a href="#takeaway">Reflection</a>
   </nav>
 
   <section class="section" id="convolutions">
@@ -537,6 +542,223 @@
         the hybrid's spectrum is essentially their sum.
       </p>
     </div>
+  </section>
+
+  <section class="section" id="stacks">
+    <span class="eyebrow">Part 2.3</span>
+    <h2>Gaussian and Laplacian Stacks</h2>
+    <p class="section-intro">
+      A stack is a pyramid without the downsampling: every level is
+      produced by convolving the <em>previous level</em> with the same
+      Gaussian kernel again, so each level is more blurred than the last
+      but all of them stay at the original image's full resolution &mdash;
+      no <code>cv2.pyrDown</code>, no <code>skimage.transform.pyramid_gaussian</code>,
+      just repeated convolution. The Laplacian stack is the running
+      difference between consecutive Gaussian levels (each one a band of
+      detail the next level's extra blur just erased), with the final,
+      most-blurred Gaussian level kept as-is as the last entry &mdash; sum
+      every level of the Laplacian stack back up and you get the original
+      image exactly.
+    </p>
+
+    <div class="compare">
+      <figure>
+        <img src="out/2_3_apple.jpg" alt="Original apple photo.">
+        <figcaption>Apple &mdash; original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_3_orange.jpg" alt="Original orange photo.">
+        <figcaption>Orange &mdash; original</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature">
+      <img src="out/2_3_fig342.jpg" alt="Recreation of Szeliski Figure 3.42: rows are Gaussian/Laplacian stack levels from fine to coarse, columns are the apple's masked Laplacian contribution, the orange's masked Laplacian contribution, and their sum, the blended level.">
+      <figcaption>Recreating Szeliski Fig. 3.42 &mdash; rows are stack levels (fine &rarr; coarse, top to bottom); columns are apple's <em>masked</em> contribution at that level (<code>mask&middot;L<sub>apple</sub></code>), orange's masked contribution (<code>(1&minus;mask)&middot;L<sub>orange</sub></code>), and their sum, the actual blended level &mdash; not each fruit's raw, unmasked Laplacian level. Every non-final row is a signed detail band on a neutral grey field (0 &rarr; mid-grey, matching the original figure); the final row is the plain, non-negative low-pass image both stacks converge to, so its masked-out half is genuinely black rather than grey.</figcaption>
+    </figure>
+
+    <figure class="feature">
+      <img src="out/2_3_oraple.jpg" alt="Final blended oraple image, apple on the left seamlessly merging into orange on the right.">
+      <figcaption>The &ldquo;oraple&rdquo; &mdash; the sum of the blended Laplacian stack above, with no visible seam where the two fruits meet.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Blending happens independently in every frequency band: the
+        finest Laplacian levels (top rows above) are blended with a sharp,
+        nearly-unblurred mask, so the boundary between the two fruits stays
+        crisp in fine texture; the coarsest level (bottom row, the plain
+        low-pass image) is blended with a mask that's been blurred almost
+        into a smooth gradient, so the two fruits' overall color and
+        shading fade into each other gradually instead of meeting at a hard
+        edge. A single-resolution blend has to pick one of those two
+        behaviors for the whole image; blending stack-by-stack gets both at
+        once, which is the entire point of doing it in the frequency domain
+        rather than directly on pixels.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="blending">
+    <span class="eyebrow">Part 2.4</span>
+    <h2>Multiresolution Blending</h2>
+    <p class="section-intro">
+      The Burt&ndash;Adelson algorithm: build a Gaussian stack for a mask
+      the same way as for the two images, then blend the two Laplacian
+      stacks level-by-level with <code>mask&middot;L1&nbsp;+&nbsp;(1&minus;mask)&middot;L2</code>
+      &mdash; the mask itself gets blurrier at coarser levels right along
+      with the images, so the blend transitions smoothly in low frequencies
+      even where the mask's edge is a hard step. Summing the blended stack
+      back up gives the final image. The oraple above used a straight
+      vertical-line mask to debug the pipeline against a known-good
+      result; the two pairs below use masks that are <em>not</em> a
+      straight line.
+    </p>
+
+    <h3>Sun + Moon &mdash; favorite result, full process</h3>
+    <div class="compare">
+      <figure>
+        <img src="out/2_4_sunmoon_sun.jpg" alt="Original photo of the sun.">
+        <figcaption>Sun &mdash; original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_4_sunmoon_moon.jpg" alt="Photo of the moon, rescaled and recentered so its disc matches the sun's size and position.">
+        <figcaption>Moon, aligned to the sun's disc</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature">
+      <img src="out/2_4_sunmoon_mask.jpg" alt="Diagonal mask through the shared disc center: upper-right half white, lower-left half black.">
+      <figcaption>The mask &mdash; a diagonal seam through the shared disc center, not a straight line across the whole frame: it only cuts the disc itself, since both photos already share a matching black background outside it.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The sun (<code>star.jpg</code>) and moon (<code>moon.jpg</code>)
+        photos don't share a scale any more than the hybrid-image faces in
+        Part 2.2 did: <code>cv2.HoughCircles</code> measured the sun's disc
+        at radius&nbsp;132 on its 340&times;340 canvas and the moon's at
+        radius&nbsp;148 on its own 300&times;300 canvas. <code>align_circle_to</code>
+        (the same idea as <code>align_face_to</code> in Part 2.2, keyed on
+        a circle's center/radius instead of an eye pair) rescales and
+        recenters the moon onto the sun's canvas so the two discs land at
+        an identical size and position before the mask ever touches them
+        &mdash; skip this and no amount of blending hides one disc being
+        visibly bigger than the other.
+      </p>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/2_4_sunmoon_sun_masked.jpg" alt="Sun photo multiplied by the diagonal mask, showing only the upper-right half of the disc.">
+        <figcaption>Sun &times; mask</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_4_sunmoon_moon_masked.jpg" alt="Aligned moon photo multiplied by the inverse mask, showing only the lower-left half of the disc.">
+        <figcaption>Moon &times; (1 &minus; mask)</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature">
+      <img src="out/2_4_sunmoon_lstack.jpg" alt="Laplacian stack of the sun and moon photos' masked contributions and their sum, from fine surface detail at the top to the coarse low-pass disc at the bottom.">
+      <figcaption>The Laplacian stack that produced the blend &mdash; left column is the sun's masked contribution at each level, middle is the moon's, right is their sum.</figcaption>
+    </figure>
+
+    <figure class="feature">
+      <img src="out/2_4_sunmoon_blend.jpg" alt="Final blended image: one disc, moon's cratered grey surface on the lower-left transitioning diagonally into the sun's golden plasma on the upper-right." >
+      <figcaption>The blend &mdash; one disc, cratered grey moon fading diagonally into golden solar plasma, with the matching black backgrounds outside the disc leaving nothing to seam.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The first pass at this used &sigma;=10 over 6 levels and still
+        showed a visible seam along the diagonal, even with the circles
+        perfectly aligned. Unlike the vertical-band Eiffel attempt earlier
+        (where the flanking regions were large, low-texture skies), the
+        sun and moon both carry real fine-grained texture &mdash; craters,
+        plasma granulation &mdash; right up to the seam on both sides, so
+        the finest Laplacian levels (which intentionally use the
+        least-blurred mask, to keep genuine detail sharp) still show a
+        fairly defined transition there. Pushing to &sigma;=30 over 8
+        levels widens that transition noticeably without smearing detail
+        in the untouched regions of either disc &mdash; verified by
+        comparing crops of the pure sun/moon areas before and after, not
+        just eyeballing the seam.
+      </p>
+    </div>
+
+    <h3>Seasonal tree &mdash; a unique mask</h3>
+    <div class="compare">
+      <figure>
+        <img src="out/2_4_tree_winter.jpg" alt="The same tree in winter, frosted and snow-covered.">
+        <figcaption>Winter &mdash; original</figcaption>
+      </figure>
+      <figure>
+        <img src="out/2_4_tree_summer.jpg" alt="The same tree in summer, with a full green leafy canopy.">
+        <figcaption>Summer &mdash; original</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature">
+      <img src="out/2_4_tree_mask.jpg" alt="Mask shaped exactly like the summer tree's leafy canopy silhouette, extracted from the photo itself rather than drawn as a geometric shape.">
+      <figcaption>The mask &mdash; not an ellipse, disc, or band, but the summer tree's own canopy <em>silhouette</em>: its green hue in HSV, thresholded and cleaned up with morphological close/open, with the grass field cropped out so only the crown shape remains. A mask derived from the image's own content instead of a synthetic geometric shape.</figcaption>
+    </figure>
+
+    <figure class="feature">
+      <img src="out/2_4_tree_blend.jpg" alt="Blended image: a full green leafy summer canopy standing in a frosty, snow-covered winter field." >
+      <figcaption>The blend &mdash; a lush summer canopy standing in the same tree's own frosted winter field, the crown's organic edge blending into the hazy winter sky with no visible seam.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Both source panels are cropped from the same <code>seasonal_trees.jpg</code>
+        collage &mdash; a single tree photographed across four seasons in
+        a 2&times;2 grid &mdash; so the winter and summer shots already
+        share a compatible framing and scale, no alignment step needed.
+        Restricting the green-hue threshold to the canopy (cutting off the
+        grass field, which is also green) mattered: without that cutoff
+        the mask covers almost the entire frame, and the blend reads as
+        &ldquo;summer with a few gaps,&rdquo; not a wintry field with a
+        summer tree standing in it. The canopy's irregular, leafy edge
+        turns out to be a forgiving boundary for multiresolution
+        blending &mdash; unlike a razor-straight mask edge, its natural
+        raggedness already resembles the kind of soft transition the
+        algorithm produces, so the blend reads as seamless even at a
+        modest &sigma;=6.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="takeaway">
+    <span class="eyebrow">Reflection</span>
+    <h2>The Most Important Thing I Learned</h2>
+    <p>
+      Every technique in this project &mdash; unsharp masking, hybrid
+      images, multiresolution blending &mdash; is the same idea applied at
+      a different scale: decompose an image into frequency bands, treat
+      each band differently, then recombine. Unsharp masking boosts one
+      band (the high-frequency residual). Hybrid images keep one band from
+      each of two photos. Multiresolution blending goes further and blends
+      <em>every</em> band independently, each with a mask blurred to match
+      that band's own scale, which is exactly why it succeeds where a
+      single-resolution blend can't: a sharp mask keeps fine texture crisp
+      right up to the seam, while a heavily blurred version of the same
+      mask lets coarse color and tone drift smoothly across it, and no
+      single mask sharpness can do both at once.
+    </p>
+    <p>
+      The debugging that stuck with me most came from forgetting this
+      principle, not from misusing it. Pre-softening a mask into a smooth
+      analog gradient before handing it to <code>multires_blend</code> &mdash;
+      instead of a hard 0/1 step and letting the algorithm's own per-level
+      Gaussian stack do the softening &mdash; quietly broke the finest
+      Laplacian levels: they blended with an already-partial mask instead
+      of a solid one, and fine detail (a beard's edge, a cloud's texture)
+      ghosted into the other image instead of staying sharp. The fix
+      wasn't more blur; it was trusting the algorithm to build its own
+      frequency-appropriate softness at each level, rather than
+      pre-deciding how soft the seam should look.
+    </p>
   </section>
 
   </main>

@@ -7,8 +7,7 @@ notebook's interactive pieces (plt.ginput point-picking, cv2.imshow display
 windows) with hardcoded correspondence points and file output, so it can run
 headless and produce every image referenced by index.html.
 
-Covers spec parts 1.1-2.2 only (2.3 / multiresolution blending is handled
-separately in the notebook).
+Covers spec parts 1.1-2.4.
 """
 import math
 import os
@@ -190,7 +189,12 @@ def part1_3(im_cameraman, im_dx, im_dy, im_grad_mag):
     im_dogy_direct = signal.convolve2d(im_cameraman, dog_y, mode='same', boundary='fill', fillvalue=0)
     two_step_match = np.allclose(im_blurred_dx, im_dogx_direct, atol=1e-8) and \
         np.allclose(im_blurred_dy, im_dogy_direct, atol=1e-8)
+    diff_dx = np.abs(im_blurred_dx - im_dogx_direct)
+    border = 6
+    interior_diff = diff_dx[border:-border, border:-border]
     print('blur-then-diff == single DoG conv:', two_step_match)
+    print('  full-image max diff:', diff_dx.max())
+    print(f'  interior (excl. {border}px border) max diff:', interior_diff.max())
 
     save01('1_3_blurred.jpg', im_blurred)
     save01('1_3_blurred_dx.jpg', normalize_signed_for_display(im_blurred_dx) / 255.0)
@@ -362,8 +366,8 @@ def crop_blank_borders(im1, im2, thresh=0.92):
 def hybrid_image(im1, im2, sigma1, sigma2):
     """im1 is the low-frequency image, im2 is the high-frequency image.
     Kernel size scales with sigma (same convention as gaussian_stack in
-    Part 2.3), unlike the notebook's fixed ksize=9 -- needed so larger
-    sigmas actually blur instead of being truncated by a tiny kernel."""
+    Part 2.3) so larger sigmas actually blur instead of being truncated
+    by a too-small kernel."""
     ksize1 = int(2 * np.ceil(3 * sigma1) + 1)
     ksize2 = int(2 * np.ceil(3 * sigma2) + 1)
     g1 = cv2.getGaussianKernel(ksize=ksize1, sigma=sigma1)
@@ -464,12 +468,210 @@ def part2_2():
     # notebook: align_images(landscape, josh) -- landscape absorbs the
     # rotation -- but hybrid_image(josh_aligned, landscape_aligned,
     # sigma1=3, sigma2=5) makes JOSH the low-frequency base and LANDSCAPE
-    # the high-frequency detail (inverted from the alignment roles, and
-    # from the stale comment in the notebook).
+    # the high-frequency detail (inverted from the alignment roles).
     landscape_pts = ((204, 316), (521, 296))
     josh_pts = ((172, 133), (310, 116))
     run_hybrid_pair('landscape_josh', 'landscape.jpg', landscape_pts, 'josh.jpg', josh_pts,
                      low_source='b', sigma_low=3.0, sigma_high=5.0, full_process=True)
+
+
+# --------------------------------------------------------------------------
+# Part 2.3: Gaussian and Laplacian stacks
+# --------------------------------------------------------------------------
+
+def gaussian_stack(im, levels, sigma=2.0):
+    ksize = int(2 * np.ceil(3 * sigma) + 1)
+    g = cv2.getGaussianKernel(ksize, sigma)
+    kernel = g @ g.T
+    stack = [im.astype(np.float64)]
+    for _ in range(1, levels):
+        stack.append(cv2.filter2D(stack[-1], -1, kernel))
+    return stack
+
+
+def laplacian_stack(g_stack):
+    l_stack = [g_stack[i] - g_stack[i + 1] for i in range(len(g_stack) - 1)]
+    l_stack.append(g_stack[-1])
+    return l_stack
+
+
+def multires_blend(im1, im2, mask, levels=6, sigma=8.0):
+    g1 = gaussian_stack(im1, levels, sigma)
+    g2 = gaussian_stack(im2, levels, sigma)
+    gm = gaussian_stack(mask.astype(np.float64), levels, sigma)
+    l1 = laplacian_stack(g1)
+    l2 = laplacian_stack(g2)
+    blended_stack = []
+    for i in range(levels):
+        m = gm[i]
+        if im1.ndim == 3 and m.ndim == 2:
+            m = m[:, :, np.newaxis]
+        blended_stack.append(m * l1[i] + (1 - m) * l2[i])
+    blended = np.clip(np.sum(blended_stack, axis=0), 0, 1)
+    return blended, l1, l2, blended_stack, gm
+
+
+def save_laplacian_grid(path, l1, l2, gm, blended_lstack, col_titles):
+    """col_titles labels three columns per level: m*l1 (im1's masked
+    contribution), (1-m)*l2 (im2's masked contribution), and their sum
+    (the actual blended level) -- not the raw, unmasked Laplacian level of
+    each source image."""
+    levels = len(l1)
+    fig, axes = plt.subplots(levels, 3, figsize=(9, 3 * levels))
+    for i in range(levels):
+        m = gm[i]
+        if l1[i].ndim == 3 and m.ndim == 2:
+            m = m[:, :, np.newaxis]
+        cols = (m * l1[i], (1 - m) * l2[i], blended_lstack[i])
+        for ax, im, col_title in zip(axes[i], cols, col_titles):
+            # 0 -> mid-grey, not black -- matches how Fig 3.42 shows these.
+            disp = im if i == levels - 1 else normalize_signed_for_display(im).astype(np.float64) / 255.
+            ax.imshow(np.clip(disp, 0, 1))
+            ax.axis('off')
+            if i == 0:
+                ax.set_title(col_title)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUT, path), dpi=110)
+    plt.close(fig)
+
+
+def part2_3():
+    print('=== Part 2.3 ===')
+    apple = load_color('apple.jpg')
+    orange = load_color('orange.jpg')
+    assert apple.shape == orange.shape, 'apple.jpg and orange.jpg must be the same size'
+
+    h, w = apple.shape[:2]
+    mask = np.zeros((h, w), dtype=np.float64)
+    mask[:, :w // 2] = 1.0
+
+    n_levels = 6
+    oraple, apple_lstack, orange_lstack, blended_lstack, mask_gstack = multires_blend(
+        apple, orange, mask, n_levels, sigma=8.0)
+
+    save01('2_3_apple.jpg', apple)
+    save01('2_3_orange.jpg', orange)
+    save01('2_3_oraple.jpg', oraple)
+    save_laplacian_grid('2_3_fig342.jpg', apple_lstack, orange_lstack, mask_gstack, blended_lstack,
+                         ('Apple × mask', 'Orange × (1 − mask)', 'Blended'))
+
+
+# --------------------------------------------------------------------------
+# Part 2.4: Multiresolution blending
+# --------------------------------------------------------------------------
+
+def center_crop_to_ratio(im, target_ratio):
+    h, w = im.shape[:2]
+    if w / h > target_ratio:
+        new_w = int(h * target_ratio)
+        x0 = (w - new_w) // 2
+        im = im[:, x0:x0 + new_w]
+    else:
+        new_h = int(w / target_ratio)
+        y0 = (h - new_h) // 2
+        im = im[y0:y0 + new_h, :]
+    return im
+
+
+def match_size(im1, im2):
+    h1, w1 = im1.shape[:2]
+    im2 = center_crop_to_ratio(im2, w1 / h1)
+    im2 = cv2.resize(im2, (w1, h1), interpolation=cv2.INTER_AREA)
+    return im1, im2
+
+
+def align_circle_to(src, src_center, src_radius, dst_shape, dst_center, dst_radius, border=(0, 0, 0)):
+    """Rescale and recenter src (scale + translation, keyed on a circle's
+    center/radius instead of an eye pair) so its disc lands exactly on
+    dst_center at dst_radius, on a canvas the size of dst_shape. Without
+    this, the sun and moon photos -- shot at different focal
+    lengths/crops -- just don't share a common apparent size, so no mask,
+    however well blended, hides one disc being visibly bigger than the
+    other."""
+    scale = dst_radius / src_radius
+    M = np.array([[scale, 0, dst_center[0] - scale * src_center[0]],
+                  [0, scale, dst_center[1] - scale * src_center[1]]], dtype=np.float64)
+    h, w = dst_shape[:2]
+    aligned = cv2.warpAffine((src * 255).astype(np.uint8), M, (w, h), borderValue=border)
+    return aligned.astype(np.float64) / 255.
+
+
+def part2_4():
+    print('=== Part 2.4 ===')
+    n_levels = 6
+
+    # Irregular mask #1 -- favorite result. Sun + Moon, split by a
+    # DIAGONAL seam through the shared disc center -- not a line straight
+    # across the whole frame (the line only cuts the disc; both flanking
+    # backgrounds are already matching black, so there's nothing to blend
+    # out there).
+    #
+    # Both photos put their disc at a different pixel radius (moon.jpg's
+    # disc is ~148px on a 300x300 canvas; star.jpg's sun is ~132px on a
+    # 340x340 canvas -- measured with cv2.HoughCircles), so the moon is
+    # rescaled and recentered onto the sun's canvas via align_circle_to
+    # first. Skipping this leaves the two discs different apparent sizes
+    # no matter how the mask is blended.
+    sun = load_color('star.jpg')
+    moon = load_color('moon.jpg')
+    moon_aligned = align_circle_to(moon, (150, 150), 148, sun.shape, (168, 169), 132)
+
+    h, w = sun.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    cx, cy = 168, 169
+    sunmoon_mask = ((xx - cx) - (yy - cy) > 0).astype(np.float64)  # 1 = sun
+
+    sunmoon_blend, sunmoon_l1, sunmoon_l2, sunmoon_lstack, sunmoon_mask_gstack = multires_blend(
+        sun, moon_aligned, sunmoon_mask, 8, sigma=30.0)
+
+    save01('2_4_sunmoon_sun.jpg', sun)
+    save01('2_4_sunmoon_moon.jpg', moon_aligned)
+    save01('2_4_sunmoon_mask.jpg', np.repeat(sunmoon_mask[:, :, np.newaxis], 3, axis=2))
+    save01('2_4_sunmoon_blend.jpg', sunmoon_blend)
+
+    sunmoon_mask_3d = sunmoon_mask[:, :, np.newaxis]
+    save01('2_4_sunmoon_sun_masked.jpg', sun * sunmoon_mask_3d)
+    save01('2_4_sunmoon_moon_masked.jpg', moon_aligned * (1 - sunmoon_mask_3d))
+    save_laplacian_grid('2_4_sunmoon_lstack.jpg', sunmoon_l1, sunmoon_l2, sunmoon_mask_gstack, sunmoon_lstack,
+                         ('Sun × mask', 'Moon × (1 − mask)', 'Blended'))
+
+    # Irregular mask #2 -- a unique mask for seasonal_trees.jpg: instead
+    # of a synthetic geometric shape (ellipse, disc, band), the mask is
+    # the actual canopy SILHOUETTE of the summer tree, extracted by
+    # thresholding its own green hue in HSV. Wherever that organic,
+    # content-derived shape falls, the summer canopy shows through;
+    # everywhere else -- sky, ground, gaps between branches -- shows the
+    # same tree's snow-covered winter self.
+    #
+    # seasonal_trees.jpg is itself a 2x2 collage of one tree across four
+    # seasons; the winter (bottom-left) and summer (bottom-right) panels
+    # are cropped out here as the two source images.
+    collage = cv2.imread(os.path.join(DATA, 'seasonal_trees.jpg'))
+    ch, cw = collage.shape[:2]
+    hh, hw = ch // 2, cw // 2
+    winter_bgr = collage[hh:ch, 0:hw]
+    summer_bgr = collage[hh:ch, hw:cw]
+    th = min(winter_bgr.shape[0], summer_bgr.shape[0])
+    tw = min(winter_bgr.shape[1], summer_bgr.shape[1])
+    winter_bgr, summer_bgr = winter_bgr[:th, :tw], summer_bgr[:th, :tw]
+    winter = cv2.cvtColor(winter_bgr, cv2.COLOR_BGR2RGB).astype(np.float64) / 255.
+    summer = cv2.cvtColor(summer_bgr, cv2.COLOR_BGR2RGB).astype(np.float64) / 255.
+
+    summer_hsv = cv2.cvtColor(summer_bgr, cv2.COLOR_BGR2HSV)
+    hue, sat, _ = cv2.split(summer_hsv)
+    canopy_mask = ((hue > 30) & (hue < 95) & (sat > 40)).astype(np.uint8) * 255
+    morph_kernel = np.ones((5, 5), np.uint8)
+    canopy_mask = cv2.morphologyEx(canopy_mask, cv2.MORPH_CLOSE, morph_kernel, iterations=2)
+    canopy_mask = cv2.morphologyEx(canopy_mask, cv2.MORPH_OPEN, morph_kernel, iterations=1)
+    canopy_mask = (canopy_mask > 127).astype(np.float64)
+    canopy_mask[160:, :] = 0.0  # exclude the green grass field -- canopy only
+
+    tree_blend, _, _, _, _ = multires_blend(summer, winter, canopy_mask, n_levels, sigma=6.0)
+
+    save01('2_4_tree_winter.jpg', winter)
+    save01('2_4_tree_summer.jpg', summer)
+    save01('2_4_tree_mask.jpg', np.repeat(canopy_mask[:, :, np.newaxis], 3, axis=2))
+    save01('2_4_tree_blend.jpg', tree_blend)
 
 
 if __name__ == '__main__':
@@ -478,4 +680,6 @@ if __name__ == '__main__':
     two_step_match = part1_3(im_cameraman, im_dx, im_dy, im_grad_mag)
     part2_1()
     part2_2()
+    part2_3()
+    part2_4()
     print('\nDone. timing =', timing, 'two_step_match =', two_step_match)
