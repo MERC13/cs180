@@ -733,31 +733,9 @@
     <span class="eyebrow">Reflection</span>
     <h2>The Most Important Thing I Learned</h2>
     <p>
-      Every technique in this project &mdash; unsharp masking, hybrid
-      images, multiresolution blending &mdash; is the same idea applied at
-      a different scale: decompose an image into frequency bands, treat
-      each band differently, then recombine. Unsharp masking boosts one
-      band (the high-frequency residual). Hybrid images keep one band from
-      each of two photos. Multiresolution blending goes further and blends
-      <em>every</em> band independently, each with a mask blurred to match
-      that band's own scale, which is exactly why it succeeds where a
-      single-resolution blend can't: a sharp mask keeps fine texture crisp
-      right up to the seam, while a heavily blurred version of the same
-      mask lets coarse color and tone drift smoothly across it, and no
-      single mask sharpness can do both at once.
-    </p>
-    <p>
-      The debugging that stuck with me most came from forgetting this
-      principle, not from misusing it. Pre-softening a mask into a smooth
-      analog gradient before handing it to <code>multires_blend</code> &mdash;
-      instead of a hard 0/1 step and letting the algorithm's own per-level
-      Gaussian stack do the softening &mdash; quietly broke the finest
-      Laplacian levels: they blended with an already-partial mask instead
-      of a solid one, and fine detail (a beard's edge, a cloud's texture)
-      ghosted into the other image instead of staying sharp. The fix
-      wasn't more blur; it was trusting the algorithm to build its own
-      frequency-appropriate softness at each level, rather than
-      pre-deciding how soft the seam should look.
+      I learned that you can, in a sense, discretize an image by
+      separating into different frequencies and use each frequency band
+      to manipulate or blend them independently before recombining.
     </p>
   </section>
 
