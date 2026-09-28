@@ -60,3 +60,6 @@ desktop.ini
 
 # Data
 data/
+
+# Internal build scripts (not part of the assignment deliverable)
+proj2/generate_outputs.py
