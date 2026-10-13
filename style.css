@@ -357,3 +357,128 @@ pre.code-block code {
   color: var(--color-text-muted);
   font-size: 0.85rem;
 }
+
+/* --- Additions for two-part, figure-heavy project pages (proj3) --- */
+
+/* Size modifiers for .feature: matplotlib contact sheets are wide strips
+   that need more than the default 560px to stay readable. */
+.feature.sm { max-width: 340px; }
+.feature.md { max-width: 760px; }
+.feature.lg { max-width: var(--wide-width); }
+
+.crop-square {
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+/* Opt-in breathing room for a sub-heading that follows a reflection or figure */
+h3.subhead {
+  margin-top: var(--space-4);
+}
+
+/* Marks the top of each half of a two-part project page */
+.section.part-head {
+  border-top: 2px solid var(--color-accent);
+}
+
+/* Math: plain HTML/Unicode, no math library */
+var {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05em;
+}
+
+/* A hat accent drawn in CSS: the combining-circumflex character drifts
+   off the letter in several fonts. */
+var.hat {
+  position: relative;
+  display: inline-block;
+}
+
+var.hat::after {
+  content: "\02C6";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -0.42em;
+  text-align: center;
+  font-style: normal;
+}
+
+.equation {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+  line-height: 1.9;
+  text-align: center;
+  background: var(--color-surface);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+/* Settings / architecture tables */
+.table-wrap {
+  overflow-x: auto;
+  margin: 0 0 var(--space-3);
+}
+
+table.data {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+table.data th,
+table.data td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+table.data th {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Hybrid image: full-size view plus the same image at viewing distance */
+.hybrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+  margin-bottom: var(--space-3);
+}
+
+.hybrid figure {
+  margin: 0;
+}
+
+.hybrid .near {
+  flex: 1 1 320px;
+  max-width: 512px;
+}
+
+.hybrid .near img {
+  width: 100%;
+  border-radius: 3px;
+  background: var(--color-surface);
+}
+
+.hybrid .far img {
+  width: 64px;
+  height: 64px;
+  border-radius: 2px;
+}
+
+.hybrid .far.zoom img {
+  width: 256px;
+  height: 256px;
+}
+
+.hybrid .far figcaption {
+  max-width: 256px;
+}

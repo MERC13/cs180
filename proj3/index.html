@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project 3 &mdash; Fun with Flow Models</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="site-name" href="../index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="../index.html">&larr; Portfolio</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">Project 3</span>
+    <h1>Fun with Flow Models</h1>
+    <p class="intro">
+      Two halves of one idea. Part A drives a pretrained text-to-image flow
+      model, PixNerd, with nothing but its velocity predictions and a
+      hand-written Euler loop &mdash; denoising, sampling, classifier-free
+      guidance, image editing, visual anagrams, and hybrid images. Part B
+      builds the machinery from scratch: a UNet trained on MNIST, first as
+      a one-step denoiser, then as a time- and class-conditioned
+      flow-matching model that draws digits out of pure noise.
+    </p>
+    <div class="meta">
+      <span class="eyebrow">CS 180 &middot; Fall 2026</span>
+      <span class="eyebrow">Due Oct 20, 2026</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow accent">Part A</span>
+    <a href="#a-noisy">1.1 Noisy Inputs</a>
+    <a href="#a-blur">1.2 Gaussian Blur</a>
+    <a href="#a-onestep">1.3 One-Step</a>
+    <a href="#a-velocity">1.4 Velocity</a>
+    <a href="#a-euler">1.5 Euler Sampling</a>
+    <a href="#a-generate">1.6 From Noise</a>
+    <a href="#a-cfg">2.1 CFG</a>
+    <a href="#a-edit">3.1 Image Editing</a>
+    <a href="#a-textedit">3.2 Text-Guided Editing</a>
+    <a href="#a-anagrams">3.3 Visual Anagrams</a>
+    <a href="#a-hybrids">3.4 Hybrid Images</a>
+  </nav>
+  <nav class="toc">
+    <span class="eyebrow accent">Part B</span>
+    <a href="#b-unet">1.1 UNet</a>
+    <a href="#b-noising">1.2 Noising</a>
+    <a href="#b-denoise">1.2.1 Training</a>
+    <a href="#b-ood">1.2.2 Out-of-Distribution</a>
+    <a href="#b-pure">1.2.3 Pure Noise</a>
+    <a href="#b-timecond">2.1 Time Conditioning</a>
+    <a href="#b-timetrain">2.2 Training</a>
+    <a href="#b-timesample">2.3 Sampling</a>
+    <a href="#b-classcond">2.4 Class Conditioning</a>
+    <a href="#b-classtrain">2.5 Training</a>
+    <a href="#b-classsample">2.6 Sampling with CFG</a>
+    <a href="#takeaway">Reflection</a>
+  </nav>
+
+  <!-- ===================================================== PART A ===== -->
+
+  <section class="section part-head" id="part-a">
+    <span class="eyebrow accent">Part A</span>
+    <h2>Exploring the Power of Flow Models</h2>
+    <p class="section-intro">
+      A flow model is trained to predict a velocity: given a noisy image
+      at time <var>t</var>, which direction points toward a clean one?
+      Everything below is a different way of using that single prediction.
+      Following the handout, <var>t</var>&nbsp;=&nbsp;0 is pure noise and
+      <var>t</var>&nbsp;=&nbsp;1 is a clean image, with a straight-line
+      path between them:
+    </p>
+
+    <div class="equation">
+      <var>x</var><sub><var>t</var></sub> = (1 &minus; <var>t</var>)&thinsp;<var>&epsilon;</var> + <var>t</var>&thinsp;<var>x</var><sub>1</sub>,
+      &emsp; <var>&epsilon;</var> ~ <var>N</var>(0, <var>I</var>)
+      <br>
+      <var>v</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>c</var>) &asymp; <var>x</var><sub>1</sub> &minus; <var>&epsilon;</var>
+      &emsp;&emsp;
+      <var>x</var><sub><var>t</var>+<var>h</var></sub> = <var>x</var><sub><var>t</var></sub> + <var>h</var>&thinsp;<var>v</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>c</var>)
+    </div>
+
+    <div class="table-wrap">
+      <table class="data">
+        <tr><th>Setting</th><th>Value used throughout</th></tr>
+        <tr><td>Model</td><td>PixNerd-XXL-P16-T2I (512&times;512 text-to-image flow model); prompts embedded with <code>model.encode</code> (Qwen3)</td></tr>
+        <tr><td>Sampler</td><td>Euler, step size <var>h</var>&nbsp;=&nbsp;0.02 (50 steps from <var>t</var>&nbsp;=&nbsp;0)</td></tr>
+        <tr><td>Guidance</td><td>CFG weight <var>w</var>&nbsp;=&nbsp;7, empty-string <code>""</code> as the unconditional prompt (from 2.1 on)</td></tr>
+        <tr><td>Randomness</td><td>Global seed 180; initial noise from <code>torch.Generator().manual_seed(seed)</code></td></tr>
+        <tr><td>Hardware</td><td>Colab Tesla T4, float32, ~11.5&nbsp;GiB peak memory</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="a-noisy">
+    <span class="eyebrow">Part A &middot; 1.1</span>
+    <h2>Constructing Noisy Training Inputs</h2>
+    <p class="section-intro">
+      A training input is not just an image plus noise &mdash; the image is
+      also scaled down by <var>t</var>. For Sections 1.1&ndash;1.5 I used a photo of
+      Sather Gate (not the Campanile), center-cropped to a square, resized
+      to 512&times;512, and normalized to RGB&nbsp;&isin;&nbsp;[&minus;1,&nbsp;1].
+      One noise tensor <var>&epsilon;</var> is sampled once (seed 180) and reused at
+      every time, so the three noisy images differ only in their mix.
+    </p>
+
+    <pre class="code-block"><code>def interpolate(image, noise, t):
+    return (1-t)*noise + t*image
+
+epsilon = noise(SEED)
+noisy = {t: interpolate(image, epsilon, t) for t in [.25, .50, .75]}
+assert torch.equal(interpolate(image, epsilon, 0), epsilon)   # t=0 is pure noise
+assert torch.equal(interpolate(image, epsilon, 1), image)     # t=1 is the clean image</code></pre>
+
+    <figure class="feature md">
+      <img src="out/parta/original.jpg" alt="Photo of Sather Gate, the green-bronze arch on UC Berkeley's campus, with trees and a red brick plaza.">
+      <figcaption>The source photo. Preprocessing center-crops it to a square, so the side gates are cut off.</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.1%20interpolation.png" alt="Four panels: the original Sather Gate crop, then the same image mixed with the same Gaussian noise at t=0.25, t=0.5 and t=0.75.">
+      <figcaption>Original, then <var>t</var>&nbsp;=&nbsp;0.25, 0.50, 0.75 &mdash; the same <var>&epsilon;</var> in every panel.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The image-to-noise amplitude ratio is <var>t</var>&nbsp;:&nbsp;(1&nbsp;&minus;&nbsp;<var>t</var>), i.e. 1:3, 1:1 and 3:1.
+        At <var>t</var>&nbsp;=&nbsp;0.25 almost nothing is left: only a faint pale patch
+        where the sky shows through the arch. At 0.50 the arch and the
+        tree line are recognizable but buried in speckle, and at 0.75 the
+        photo is essentially intact with grain on top. The panels also look
+        flatter and lower-contrast than the original &mdash; that is the
+        <var>t</var> scaling at work, and it is why the classical baseline in 1.2
+        divides by <var>t</var> before blurring.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-blur">
+    <span class="eyebrow">Part A &middot; 1.2</span>
+    <h2>Classical Denoising</h2>
+    <p class="section-intro">
+      The baseline uses no learned model: restore the image amplitude by
+      dividing by <var>t</var>, then average neighboring pixels so the
+      independent noise partially cancels.
+    </p>
+
+    <div class="equation">
+      <var>x</var><sub><var>t</var></sub> / <var>t</var> = <var>x</var><sub>1</sub> + ((1 &minus; <var>t</var>) / <var>t</var>)&thinsp;<var>&epsilon;</var>,
+      &emsp; <var class="hat">x</var><sub>1</sub><sup>blur</sup> = <var>G</var><sub><var>&sigma;</var></sub>( <var>x</var><sub><var>t</var></sub> / <var>t</var> )
+    </div>
+
+    <p>
+      For each time I swept <var>&sigma;</var>&nbsp;&isin;&nbsp;{1, 2, 4, 8, 16} (kernel size
+      6<var>&sigma;</var>&nbsp;+&nbsp;1) and kept the <var>&sigma;</var> with the lowest MSE against the
+      clean image. That selection peeks at the ground truth, which a real
+      denoiser could not do &mdash; it makes this the <em>best case</em> for
+      Gaussian blur.
+    </p>
+
+    <pre class="code-block"><code>candidates = {s: gaussian_blur(x/t, [int(6*s+1)]*2, [s,s]) for s in [1., 2., 4., 8., 16.]}
+sigma = min(candidates, key=lambda s: ((candidates[s]-image)**2).mean().item())</code></pre>
+
+    <figure class="feature md">
+      <img src="out/parta/1.2%208blur.png" alt="Left: the t=0.25 noisy image, almost pure static. Right: its best Gaussian blur at sigma 8, a smeared field of blue, green and red blobs.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.25 &mdash; noisy input (left), best Gaussian blur <var>&sigma;</var>&nbsp;=&nbsp;8 (right)</figcaption>
+    </figure>
+    <figure class="feature md">
+      <img src="out/parta/1.2%204blur.png" alt="Left: the t=0.5 noisy image. Right: its best Gaussian blur at sigma 4, a soft image where the arch is visible but mushy.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.50 &mdash; noisy input (left), best Gaussian blur <var>&sigma;</var>&nbsp;=&nbsp;4 (right)</figcaption>
+    </figure>
+    <figure class="feature md">
+      <img src="out/parta/1.2%201blur.png" alt="Left: the t=0.75 noisy image. Right: its best Gaussian blur at sigma 1, with the speckle softened but the arch still sharp enough to read.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.75 &mdash; noisy input (left), best Gaussian blur <var>&sigma;</var>&nbsp;=&nbsp;1 (right)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The best <var>&sigma;</var> climbs from 1 to 4 to 8 as noise increases, and every
+        step up costs detail. At 0.75 a one-pixel-scale blur removes the
+        grain at a small price in sharpness; at 0.50 the arch survives as a
+        soft shape; at 0.25 nothing but colored blobs for sky, foliage and
+        brick remains. A Gaussian is a fixed, image-agnostic low-pass
+        filter, so it cannot separate noise from fine texture &mdash;
+        removing one removes the other.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-onestep">
+    <span class="eyebrow">Part A &middot; 1.3</span>
+    <h2>One-Step Denoising</h2>
+    <p class="section-intro">
+      The model predicts a velocity, not the clean image, so to get a
+      clean-image estimate I extrapolate along that velocity for the
+      remaining time <var>1&nbsp;&minus;&nbsp;t</var>, using the prompt
+      &ldquo;a high quality photo&rdquo;.
+    </p>
+
+    <div class="equation">
+      <var class="hat">x</var><sub>1</sub> = <var>x</var><sub><var>t</var></sub> + (1 &minus; <var>t</var>)&thinsp;<var>v</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>c</var>)
+    </div>
+
+    <pre class="code-block"><code>def one_step_denoise(x, t, condition, predict_velocity):
+    return x + (1-t)*predict_velocity(x, t, condition)
+
+v = predict_velocity(noisy[.5], .5, condition)
+assert v.shape == image.shape and v.dtype == image.dtype and v.device == image.device
+assert torch.isfinite(v).all()</code></pre>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.3%2075noise.png" alt="Three panels at t=0.25: the original Sather Gate, the almost pure-noise input, and a blurry but plausible one-step estimate with the arch and plaza in the right places but no fine detail.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.25 &mdash; original, noisy input, one-step estimate</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/1.3%2050noise.png" alt="Three panels at t=0.5: the original, the noisy input with the arch visible through speckle, and a clean but smoother one-step estimate.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.50 &mdash; original, noisy input, one-step estimate</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/1.3%2025noise.png" alt="Three panels at t=0.75: the original, a lightly noisy input, and a near-perfect one-step estimate.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.75 &mdash; original, noisy input, one-step estimate</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        One step is excellent at 0.75, good but smoother at 0.50 (the
+        foliage and brick texture are partly averaged away), and at 0.25
+        it produces a clean-looking but featureless image: the arch,
+        trees and plaza are in the right places, while the ornament, the
+        pedestrians and the paving lines are gone. Compared with Gaussian
+        blur, though, it is dramatically better at every noise level
+        &mdash; it removes the noise <em>without</em> blurring the
+        structure that the blur destroyed.
+      </p>
+      <p>
+        The blur is not a bug; it follows from the training loss. A network
+        trained with squared error learns a conditional mean,
+        <var class="hat">v</var> = <var>E</var>[<var>x</var><sub>1</sub> &minus; <var>&epsilon;</var> | <var>x</var><sub><var>t</var></sub>]. Because
+        <var>x</var><sub><var>t</var></sub> = (1&nbsp;&minus;&nbsp;<var>t</var>)<var>&epsilon;</var> + <var>t</var><var>x</var><sub>1</sub>, the noise term can be eliminated,
+        <var>E</var>[<var>&epsilon;</var> | <var>x</var><sub><var>t</var></sub>] = (<var>x</var><sub><var>t</var></sub> &minus; <var>t</var>&thinsp;<var>E</var>[<var>x</var><sub>1</sub> | <var>x</var><sub><var>t</var></sub>]) / (1&nbsp;&minus;&nbsp;<var>t</var>),
+        and substituting into the one-step formula gives exactly
+        <var class="hat">x</var><sub>1</sub> = <var>E</var>[<var>x</var><sub>1</sub> | <var>x</var><sub><var>t</var></sub>]. The one-step output is the
+        <em>average</em> of every clean image consistent with the noisy
+        input. When little noise is present there is essentially one such
+        image; when a lot is present, the average is a smooth blend. Part B
+        <a href="#b-pure">1.2.3</a> shows the extreme case of the same effect.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-velocity">
+    <span class="eyebrow">Part A &middot; 1.4</span>
+    <h2>Visualizing Velocity</h2>
+    <p class="section-intro">
+      In 1.3 the model adds (1&nbsp;&minus;&nbsp;<var>t</var>)&thinsp;<var class="hat">v</var> to the noisy image. Because
+      I know the original, I also know exactly what <em>should</em> be added,
+      <var>x</var><sub>1</sub>&nbsp;&minus;&nbsp;<var>x</var><sub><var>t</var></sub> = (1&nbsp;&minus;&nbsp;<var>t</var>)(<var>x</var><sub>1</sub>&nbsp;&minus;&nbsp;<var>&epsilon;</var>). The error heatmap is the
+      per-pixel RMS difference between the two updates across RGB,
+      computed before any display scaling:
+    </p>
+
+    <div class="equation">
+      <var>E</var><sub><var>t</var></sub> = &radic;&thinsp;mean<sub>RGB</sub>( [ (1 &minus; <var>t</var>)(<var class="hat">v</var><sub><var>t</var></sub> &minus; <var>v</var><sub>gt</sub>) ]<sup>2</sup> )
+    </div>
+
+    <pre class="code-block"><code>predicted_velocity    = predict_velocity(x_t, t, condition)
+predicted_update      = (1-t) * predicted_velocity
+ground_truth_update   = image - noisy[t]                      # x1 - x_t
+ground_truth_velocity = ground_truth_update / (1-t)           # x1 - epsilon
+error_map = torch.sqrt(torch.mean(((1-t)*(predicted_velocity - ground_truth_velocity))**2, dim=1))</code></pre>
+
+    <p>
+      Display: all six updates share one symmetric RGB scale (zero is
+      middle gray, &plusmn; the largest magnitude across all of them), and all three
+      error maps share one linear scale from 0 to the largest error among them
+      (matplotlib's default colormap), so brightness is comparable across times.
+    </p>
+
+    <figure class="feature sm">
+      <img class="crop-square" src="out/parta/original.jpg" alt="The Sather Gate photo, center-cropped to a square, as seen by the model.">
+      <figcaption>Original (center-cropped to 512&times;512)</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.4%2025error.png" alt="Four panels at t=0.25: the noisy image, the predicted update, the ground-truth update, and an RGB RMS error heatmap that is brightest along edges and foliage.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.25 &mdash; noisy image, predicted update, ground-truth update, error</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/1.4%2050error.png" alt="Four panels at t=0.5: the noisy image, a fainter predicted update, the ground-truth update, and a dimmer error heatmap.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.50 &mdash; noisy image, predicted update, ground-truth update, error</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/1.4%2075error.png" alt="Four panels at t=0.75: a lightly noisy image, nearly gray predicted and ground-truth updates, and a very dim error heatmap.">
+      <figcaption><var>t</var>&nbsp;=&nbsp;0.75 &mdash; noisy image, predicted update, ground-truth update, error</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Three things stand out. First, the updates shrink as <var>t</var> grows: at 0.75
+        both are close to uniform gray (nearly zero) because there is little
+        left to add, and the <var>(1&nbsp;&minus;&nbsp;t)</var> factor shrinks them further. Second,
+        the predicted update is a <em>smoothed</em> version of the true one: it
+        gets the large-scale tones right &mdash; sky, tree mass, arch, plaza
+        &mdash; but the ground truth also carries fine pattern (brick lines,
+        leaf texture, carved ornament) that the prediction omits. Third, the
+        error heatmap lights up along edges and textured regions and is
+        near zero in the smooth sky, so the model is most reliable exactly where the
+        image is most predictable. On the shared scale the error is largest
+        at 0.25 and fades by 0.75.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-euler">
+    <span class="eyebrow">Part A &middot; 1.5</span>
+    <h2>Iterative Denoising with Euler Sampling</h2>
+    <p class="section-intro">
+      The velocity changes as the image changes, so one big step is
+      inaccurate. Instead: take a small step, recompute the velocity at the
+      new point, repeat. The last step is shortened if needed so the
+      integration lands on <var>t</var>&nbsp;=&nbsp;1 exactly.
+    </p>
+
+    <pre class="code-block"><code>@torch.inference_mode()
+def euler_sample(x_start, t_start, step_size, velocity):
+    curr_t = float(t_start)
+    curr_x = x_start
+    states = []
+
+    steps = math.ceil((1.0 - t_start) / step_size)
+
+    for i in range(steps):
+        h = min(step_size, 1.0 - curr_t)
+        v = velocity(curr_x, curr_t)
+        curr_x = curr_x + h * v
+        curr_t += h
+        states.append([curr_t, curr_x])
+
+    return curr_x, states</code></pre>
+
+    <p>
+      I tested it against a constant velocity field (<var>v</var>&nbsp;=&nbsp;1 on an
+      all-zeros tensor), where the answer is known analytically: starting at
+      <var>t</var>&nbsp;=&nbsp;0 it makes 50 velocity calls, at 0.5 it makes 25, and at 0.93 it
+      makes 4 (three steps of 0.02 plus a shortened step of 0.01). In every
+      case the final time is exactly 1 and the result is 1&nbsp;&minus;&nbsp;<var>t</var><sub>0</sub>
+      everywhere.
+    </p>
+
+    <p>
+      Starting from the saved <var>t</var>&nbsp;=&nbsp;0.50 noisy image, 25 updates with
+      <var>h</var>&nbsp;=&nbsp;0.02. Below: the initial state and every fifth update (which land
+      at <var>t</var>&nbsp;=&nbsp;0.6, 0.7, 0.8, 0.9, and the final 1.0).
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.5%20iterative.png" alt="Six panels showing the Euler trajectory at t=0.50, 0.60, 0.70, 0.80, 0.90 and 1.00: heavy noise gradually clears into a sharp image of Sather Gate.">
+      <figcaption>Euler trajectory, <var>t</var>&nbsp;=&nbsp;0.50 &rarr; 1.00 (initial state, then every fifth update)</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.5%20compare.png" alt="Four panels from the same t=0.5 noisy input: the original, the Gaussian blur result (very blurry), the one-step estimate (smooth), and the Euler result (sharp and close to the original).">
+      <figcaption>Same <var>t</var>&nbsp;=&nbsp;0.50 input &mdash; original, Gaussian blur, one-step, Euler (25 steps)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The trajectory shows a coarse-to-fine order: by <var>t</var>&nbsp;=&nbsp;0.7 the arch,
+        trees and plaza are in place and the speckle is already fading, while
+        fine texture (stonework, foliage, the figures) sharpens last, between
+        0.8 and 1.0. In the comparison, blur is the worst, one-step is clean
+        but smooth with muted texture, and Euler is clearly the sharpest
+        and closest to the original. It is worth being precise about what
+        Euler recovers, though: the fine detail is <em>re-synthesized</em>,
+        not recovered &mdash; the carved ornament and the pedestrians are
+        plausible but not identical to the original. Taking many small
+        steps lets each step commit to a little more detail given what
+        has already been decided, instead of averaging over every possibility
+        at once as the single step does.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-generate">
+    <span class="eyebrow">Part A &middot; 1.6</span>
+    <h2>Generating Images from Noise</h2>
+    <p class="section-intro">
+      The same <code>euler_sample</code> generates images from scratch:
+      start at <var>t</var>&nbsp;=&nbsp;0 with <code>torch.randn</code> noise and integrate all 50
+      steps to <var>t</var>&nbsp;=&nbsp;1, using the prompt &ldquo;a high quality photo&rdquo;
+      and no guidance. I ran two sets of five seeds.
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/parta/1.6%20base.png" alt="Five unguided samples for seeds 180 to 184: all portraits of people, several with distorted faces or bodies, including one with no face at all.">
+      <figcaption>Seeds 180, 181, 182, 183, 184 &mdash; &ldquo;a high quality photo&rdquo;, no guidance</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/1.6%20alt.png" alt="Five more unguided samples for seeds 180, 200, 220, 240 and 260: again all portraits, again with visible flaws such as a distorted mouth or a mangled hand.">
+      <figcaption>Seeds 180, 200, 220, 240, 260 &mdash; same prompt, no guidance</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        <strong>Subject bias:</strong> all ten samples are portraits of
+        people, even though the prompt names no subject. &ldquo;A high quality
+        photo&rdquo; evidently sits closest to portrait photography in
+        the model's training distribution, so the unspecific prompt collapses
+        onto that mode. Quality is poor, too: seed 180 has a blank, faceless
+        head, 181 an unnaturally textured torso, 183 a melted face, 200 a
+        distorted mouth, 240 a mangled hand, and 260 a scrunched, warped
+        face. The composition is
+        sensible but the details do not hold together &mdash; the
+        conditional-only velocity is not decisive enough.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-cfg">
+    <span class="eyebrow">Part A &middot; 2.1</span>
+    <h2>Classifier-Free Guidance</h2>
+    <p class="section-intro">
+      Guidance trades diversity for prompt alignment and quality. Evaluate
+      the model twice at the same <var>x</var><sub><var>t</var></sub> and <var>t</var> &mdash; once with the text
+      prompt (<var>v</var><sub><var>c</var></sub>) and once with the empty string (<var>v</var><sub><var>u</var></sub>) &mdash; and push the
+      prediction further in the direction the prompt adds:
+    </p>
+
+    <div class="equation">
+      <var>v</var><sub>cfg</sub> = <var>v</var><sub><var>c</var></sub> + <var>w</var>&thinsp;(<var>v</var><sub><var>c</var></sub> &minus; <var>v</var><sub><var>u</var></sub>),
+      &emsp; <var>w</var> = 7
+    </div>
+
+    <pre class="code-block"><code>def cfg_velocity(x, t, condition, w, predict_velocity, null_condition=null_condition):
+    v_c = predict_velocity(x, t, condition)
+    return v_c + w * (v_c - predict_velocity(x, t, null_condition))
+
+x = noise(SEED)
+assert torch.equal(cfg_velocity(x, .5, condition, 0, predict_velocity, null_condition),
+                   predict_velocity(x, .5, condition))   # w = 0 is plain conditional sampling</code></pre>
+
+    <p>
+      Below are the same two seed sets as Section 1.6 &mdash; identical
+      initial noises, same prompt &ldquo;a high quality photo&rdquo;, now
+      with <var>w</var>&nbsp;=&nbsp;7. Compare each panel with its counterpart above.
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/parta/2.1%20base.png" alt="Five guided samples for seeds 180 to 184: clean, well-lit studio portraits of adults with natural faces and no visible artifacts.">
+      <figcaption>Seeds 180&ndash;184, <var>w</var>&nbsp;=&nbsp;7 (compare Section 1.6, first set)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/parta/2.1%20alt.png" alt="Five guided samples for seeds 180, 200, 220, 240 and 260: again clean, front-facing studio portraits with well-formed faces.">
+      <figcaption>Seeds 180, 200, 220, 240, 260, <var>w</var>&nbsp;=&nbsp;7 (compare Section 1.6, second set)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        <strong>Quality up.</strong> Every one of the ten guided samples is a
+        well-formed, well-lit portrait &mdash; the faceless head, melted
+        face, mangled hand and warped torsos from 1.6 are all gone.
+        <strong>Diversity down.</strong> They also converge on the same kind
+        of picture: a front-facing, head-and-shoulders studio portrait of
+        a young adult against a plain background. This is the guidance
+        trade-off in action: the extrapolation <var>v</var><sub><var>c</var></sub>&nbsp;&minus;&nbsp;<var>v</var><sub><var>u</var></sub> pushes
+        toward what is typical of the prompt and away from the unconditional
+        mix, which makes outputs better and more alike.
+      </p>
+      <p>
+        Interestingly, guidance changes the <em>details</em> far more than
+        the <em>layout</em>, because the same initial noise still fixes
+        the coarse structure early in the trajectory. The background tone
+        carries over in nearly every pair (dark stays dark, light stays
+        light), and seed 182 keeps its pose of a hand raised to the
+        cheek &mdash; the guided version simply renders it correctly, and
+        seed 183 keeps its dark background and dark hair.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-edit">
+    <span class="eyebrow">Part A &middot; 3.1</span>
+    <h2>Image-to-Image Editing</h2>
+    <p class="section-intro">
+      To edit a real image, noise it to a starting time <var>t</var><sub>start</sub> and then
+      denoise from there with the guided sampler. The more noise I add (the
+      smaller <var>t</var><sub>start</sub>), the less of the original is left to hold on to, so the
+      model has to invent more &mdash; it is forced back onto the manifold of
+      natural images. This is the SDEdit idea. Every sweep uses the same seven
+      starting times, 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50, the same
+      noise <var>&epsilon;</var> (seed 180) throughout, and the prompt &ldquo;a high quality
+      photo&rdquo;. Panels read left to right, top to bottom: original, then
+      the seven edits.
+    </p>
+
+    <pre class="code-block"><code>def edit(image, noise, t_start, condition, predict_velocity, w=7, step_size=0.02):
+    x_start = interpolate(image, noise, t_start)
+
+    def guided_v(x, t):
+        return cfg_velocity(x, t, condition, w, predict_velocity, null_condition=null_condition)
+
+    x_final, _ = euler_sample(x_start, t_start, step_size, guided_v)
+    return x_final</code></pre>
+
+    <div class="filmstrip">
+      <img src="out/parta/art.jpg" alt="Input: impressionist painting of a sunset over water, downloaded from the web.">
+      <img src="out/parta/dog.jpg" alt="Input: close-up photo of a dog's head in warm orange light.">
+      <img src="out/parta/link_drawing.jpg" alt="Input: grey-and-blue drawing of two fighting figures.">
+      <img src="out/parta/stick_figure.jpg" alt="Input: black-outline stick figure drawing on white.">
+    </div>
+    <p class="fallback-link">Other inputs used below, left to right: a painted sunset (from the web), a dog photo (test image 2), and two drawings. The Sather Gate photo (test image 1) is shown in 1.1.</p>
+
+    <h3 class="subhead">Campanile</h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.1a%20campanile.png" alt="The Campanile photo and seven edits. At t=0.02 a pale rounded shape on blurry blue; at 0.04 to 0.14 a smooth cream obelisk with no clock or arches; at 0.25 the belfry arches reappear; at 0.50 the clock and slits are back.">
+      <figcaption>Campanile &mdash; original, then <var>t</var><sub>start</sub> = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        At 0.02 only a pale, rounded vertical shape against a blurry blue
+        field survives. From 0.04 to 0.14 the model produces a smooth cream
+        obelisk with the right silhouette, proportions and sky &mdash; but no
+        belfry arches and no clock (at 0.06 it even adds a spurious dark
+        bracket near the top). The three belfry arches and a small clock
+        smudge come back at 0.25, and the clock hands and the vertical
+        slits only at 0.50.
+      </p>
+    </div>
+
+    <h3 class="subhead">Test image 1: Sather Gate</h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.1a%20sather.png" alt="The Sather Gate photo and seven edits. Low starting times give a faceless person, a torso, and framed pictures with a salmon-red label; 0.14 gives a tree-lined street; 0.25 and 0.50 bring the gate back.">
+      <figcaption>Sather Gate &mdash; original, then <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        With almost nothing to hold on to, the sampler falls back on the
+        portrait bias seen in 1.6 (a faceless, curly-haired head at 0.02, a
+        torso at 0.04). What survives from the input is its coarse color
+        layout: the red brick plaza reappears at the bottom of the frame
+        as a salmon-red label through 0.10 and as a red mat on a
+        tree-lined street at 0.14. The gate itself returns at 0.25
+        (though with a smoothed, painted look and some invented
+        cars) and is faithful by 0.50.
+      </p>
+    </div>
+
+    <h3 class="subhead">Test image 2: a dog</h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.1a%20dog.png" alt="A close-up of a dog's head in warm orange light and seven edits. Low starting times give a person's portrait beside a dark screen, then an abstract grey object on an orange wall; 0.25 and 0.50 bring the dog back.">
+      <figcaption>Dog &mdash; original, then <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        At 0.02 and 0.04 the input becomes a person's portrait with a
+        black, monitor-like object beside the head &mdash; plausibly the
+        dog's dark ear, reinterpreted. At 0.06&ndash;0.14 the result is an ambiguous smooth object, like
+        a headphone or lens, set against the original's orange wall &mdash; the
+        warm orange backdrop is the one thing that persists across almost
+        the entire sweep. At 0.25 the dog is back in its original pose and
+        sunlight, with different facial detail (the eye in particular), and
+        at 0.50 it is close to the input with slightly smoothed fur.
+      </p>
+    </div>
+
+    <h3 class="subhead">Web image: a painting</h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.1b%20art.jpg" alt="An impressionist painting of a sunset over water and seven edits. At 0.02 a smiling woman; at 0.04 and 0.06 a pink camera-like object; at 0.10 and 0.14 a photographic sunset; at 0.25 and 0.50 the brushstrokes return.">
+      <figcaption>Painted sunset (downloaded from the web) &mdash; original, then <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        A painting is already off the natural-image manifold, which makes
+        this the clearest demonstration of the projection. At 0.02&ndash;0.06
+        the input is gone (a smiling woman, then a pink camera-like object
+        with mirrored lettering). At 0.10 and 0.14 the composition has
+        returned &mdash; sun at the center, a column of reflected light on the
+        water &mdash; but rendered as a <em>photograph</em>: smooth clouds,
+        a distant shoreline, realistic water. The brushstroke texture
+        only comes back at 0.25 and is nearly complete at 0.50.
+      </p>
+    </div>
+
+    <h3 class="subhead">Hand-drawn images</h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.1b%20link_drawing.jpg" alt="A grey-and-blue drawing of two fighting figures and seven edits. Low starting times give a black-and-white portrait of a man, hands holding gadgets and cups; at 0.25 the figures return but fused together; at 0.50 both are mostly recovered.">
+      <figcaption>Drawing 1: two fighting figures &mdash; original, then <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <p>
+      The mostly grey palette seems to push the model toward
+      black-and-white photographs: a man's portrait at 0.02 and 0.10, and
+      hands holding a cup or a gadget from 0.04 to 0.14. The blue of the cap is the one color that
+      persists, lingering in a blue device at 0.14. At 0.25 the two
+      figures reappear but are fused into a single smeared shape; by 0.50
+      both are recovered with softer linework and a few warped regions.
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/parta/3.1b%20stick_figure.jpg" alt="A simple black-outline stick figure drawing and seven edits. At 0.02 a white bowl; at 0.04 part of the head outline; at 0.06 the face with eyes; from 0.10 on a cleaned-up copy of the original drawing.">
+      <figcaption>Drawing 2: stick figure &mdash; original, then <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <p>
+      A bold, high-contrast line drawing on white is far easier to hold on
+      to: the big head outline starts to reappear at 0.04, the eyes by 0.06,
+      and from 0.10 the output is essentially the original redrawn with
+      slightly softer, more uniform lines. Only the lowest
+      time (0.02) loses it entirely &mdash; a white bowl whose rim echoes
+      the head's curve.
+    </p>
+
+    <div class="reflection">
+      <p>
+        The same arc appears in every sweep. Below about 0.05 the input is
+        effectively gone and the model samples a generic (usually
+        portrait-like) image; between roughly 0.06 and 0.14 is a transition
+        zone where only the <em>low-frequency layout</em> &mdash; large
+        regions of color and their positions &mdash; shapes a new scene;
+        by 0.25 structure is back; and at 0.50 the edit is a light
+        restoration. The images that sit furthest from natural photographs
+        (the painting and the drawing) benefit most from the middle of
+        the range, where the model re-renders them in a photographic
+        or physical style. Using the same <var>&epsilon;</var> for every starting time
+        also makes each sweep change smoothly rather than randomly.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-textedit">
+    <span class="eyebrow">Part A &middot; 3.2</span>
+    <h2>Text-Guided Image Editing</h2>
+    <p class="section-intro">
+      Same procedure and starting times as 3.1, but the generic photo
+      prompt is replaced with a prompt describing the edit I want. Small
+      <var>t</var><sub>start</sub> gives the prompt more room; large <var>t</var><sub>start</sub> keeps more of the original.
+    </p>
+
+    <h3 class="subhead">Campanile &rarr; <code>"a redwood tree"</code></h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.2%20redwood.jpg" alt="The Campanile and seven edits with the prompt 'a redwood tree'. At 0.02 a cartoon red tree; at 0.04 and 0.06 the tower becomes a reddish tapered trunk among pines; at 0.10 and 0.14 a pale wooden obelisk; at 0.25 and 0.50 the tower returns almost unchanged.">
+      <figcaption>Prompt: &ldquo;a redwood tree&rdquo; &mdash; <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        At 0.02 the prompt wins completely, and since it says nothing
+        about photography the result is a cartoon tree. The more interesting
+        part is 0.04&ndash;0.14, where the Campanile's framing, taper and
+        sky are kept while its stone becomes bark: a reddish, striated trunk
+        rising from a pine forest, and later a pale wooden obelisk that
+        still has the tower's window box on top. By 0.25 only faint bark
+        grain on the stone remains, and at 0.50 the prompt has almost no
+        visible effect.
+      </p>
+    </div>
+
+    <h3 class="subhead">Sather Gate &rarr; <code>"a scary smile"</code></h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.2%20smile.jpg" alt="Sather Gate and seven edits with the prompt 'a scary smile'. At 0.02 to 0.06 grinning, blue-teal faces with red lips; at 0.10 and 0.14 framed, cartoon-outlined pictures with a red label; at 0.25 the gate with an uncanny painted look; at 0.50 close to the original.">
+      <figcaption>Prompt: &ldquo;a scary smile&rdquo; &mdash; <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        Here the palette does the work. The gate's blue-green patina and red
+        brick turn into blue-teal skin and red lips in the grinning faces
+        at 0.02&ndash;0.06, so the prompt is rendered <em>in the original's
+        colors</em>. At 0.10 and 0.14 the result is a half-way object &mdash; a
+        framed, cartoon-outlined picture over a red label &mdash; and at
+        0.25 the gate is back, but with a flat, slightly menacing painted look
+        before 0.50 returns almost the original.
+      </p>
+    </div>
+
+    <h3 class="subhead">Dog &rarr; <code>"a yummy breakfast"</code></h3>
+    <figure class="feature lg">
+      <img src="out/parta/3.2%20breakfast.jpg" alt="The dog photo and seven edits with the prompt 'a yummy breakfast'. At 0.02 to 0.14 plates of blueberries, chocolate cake, fries and oranges; at 0.25 the dog's head on the right and food on the left; at 0.50 the dog with food-colored smears below.">
+      <figcaption>Prompt: &ldquo;a yummy breakfast&rdquo; &mdash; <var>t</var><sub>start</sub> = 0.02 &hellip; 0.50</figcaption>
+    </figure>
+    <div class="reflection">
+      <p>
+        From 0.02 to 0.14 the dog becomes food, again guided by color: the
+        orange backdrop turns into orange slices, a table and fries, and the
+        dark brown fur becomes chocolate cake. The most revealing result
+        is 0.25, a literal split composition &mdash; the dog's head on the
+        right half and breakfast on the left, with a visible seam where the
+        original's structure and the prompt each win. At 0.50 the dog
+        remains, with food-colored smears along the bottom.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-anagrams">
+    <span class="eyebrow">Part A &middot; 3.3</span>
+    <h2>Visual Anagrams</h2>
+    <p class="section-intro">
+      An anagram is one image that reads as two different things depending
+      on orientation. At every Euler step I denoise <var>x</var><sub><var>t</var></sub> normally with prompt
+      <var>p</var><sub>1</sub>, denoise it rotated by 180&deg; with prompt <var>p</var><sub>2</sub>, rotate that prediction back,
+      and average the two velocities. The image therefore has to be a good
+      denoising step for <var>p</var><sub>1</sub> upright <em>and</em> for <var>p</var><sub>2</sub> upside down at
+      the same time.
+    </p>
+
+    <div class="equation">
+      <var>v</var><sub>1</sub> = CFG(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>p</var><sub>1</sub>)
+      &emsp; <var>v</var><sub>2</sub> = flip( CFG( flip(<var>x</var><sub><var>t</var></sub>), <var>t</var>, <var>p</var><sub>2</sub> ) )
+      &emsp; <var>v</var> = (<var>v</var><sub>1</sub> + <var>v</var><sub>2</sub>) / 2
+    </div>
+
+    <pre class="code-block"><code>def rotate180(x):
+    return torch.flip(x, (-2, -1))        # both spatial axes, not just a vertical flip
+
+def visual_anagrams(noise, condition_a, condition_b, predict_velocity, w=7, step_size=0.02):
+    def joint_velocity(x, t):
+        v_a = cfg_velocity(x, t, condition_a, w, predict_velocity, null_condition=null_condition)
+        x_rotated = rotate180(x)
+        v_b_rotated = cfg_velocity(x_rotated, t, condition_b, w, predict_velocity, null_condition=null_condition)
+        v_b = rotate180(v_b_rotated)
+        return (v_a + v_b) / 2.0
+
+    x_final, _ = euler_sample(noise, 0.0, step_size, joint_velocity)
+    return x_final</code></pre>
+
+    <p>
+      In each figure the left panel is the image upright and the right panel
+      is the same image rotated 180&deg;; each is titled with the prompt it
+      was optimized for.
+    </p>
+
+    <h3 class="subhead">New York City skyline &#8596; a chess board</h3>
+    <figure class="feature md">
+      <img src="out/parta/3.3%20skyline-chess.jpg" alt="Left, upright: a pale New York City skyline above a band of large chess pieces and dark buildings. Right, rotated 180 degrees: chess pieces standing on a checkered board with the skyline appearing upside down below.">
+      <figcaption>Left: &ldquo;New York City skyline&rdquo; (upright). Right: &ldquo;a chess board&rdquo; (rotated 180&deg;). Seed 181.</figcaption>
+    </figure>
+
+    <h3 class="subhead">Snowy mountain village &#8596; a horse</h3>
+    <figure class="feature md">
+      <img src="out/parta/3.3%20example.jpg" alt="Left, upright: a pencil-style lithograph of a snowy mountain village with a horse's head faintly visible at the bottom. Right, rotated 180 degrees: a horse standing in a snowy landscape with village roofs across the top.">
+      <figcaption>Left: &ldquo;a lithograph of a snowy mountain village&rdquo; (upright). Right: &ldquo;a lithograph of a horse&rdquo; (rotated 180&deg;).</figcaption>
+    </figure>
+
+    <h3 class="subhead">An attempt that only half works: a black man &#8596; a white woman</h3>
+    <figure class="feature md">
+      <img src="out/parta/3.3%20man-woman.jpg" alt="Left, upright: a bald man's face and white t-shirt with a smaller upside-down face fragment under his chin. Right, rotated 180 degrees: a long-haired woman's face at the top with the man's eyes visible upside down below.">
+      <figcaption>Left: &ldquo;a black man&rdquo; (upright). Right: &ldquo;a white woman&rdquo; (rotated 180&deg;). Seed 180.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The skyline / chess board pair is the cleanest: both orientations
+        read clearly, with only traces of the other subject (chess pieces
+        among the buildings upright; the skyline hanging upside down
+        beneath the board when rotated). It works because the two scenes
+        share a layout &mdash; vertical objects standing on a horizontal
+        band &mdash; so the same pixels can serve both. The village / horse pair reads both ways, but each view still
+        carries a faint copy of the other subject (a horse's head near the
+        foot of the village scene). The man / woman pair is weakest: each
+        view is dominated by its own subject but with a ghost of the other,
+        because both prompts want a face in the same region and the
+        facial features collide when rotated, so an inverted face remains
+        visible under the man's chin. That pattern holds across the three
+        pairs above: illusions work best when the two subjects can
+        <em>share</em> structure, not compete for the same pixels. They also
+        needed several attempts &mdash; a numerically successful run does not
+        guarantee that both subjects are recognizable.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-hybrids">
+    <span class="eyebrow">Part A &middot; 3.4</span>
+    <h2>Hybrid Images</h2>
+    <p class="section-intro">
+      Project 2's hybrid images, generated instead of composited: at each
+      step I take the low frequencies of one prompt's guided velocity and
+      the high frequencies of another's, so the image is built from the
+      prompt for coarse shape (what you see from far away) and a different
+      prompt for fine detail (what you see up close).
+    </p>
+
+    <div class="equation">
+      <var>v</var><sub>1</sub> = CFG(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>p</var><sub>1</sub>)
+      &emsp; <var>v</var><sub>2</sub> = CFG(<var>x</var><sub><var>t</var></sub>, <var>t</var>, <var>p</var><sub>2</sub>)
+      &emsp; <var>v</var> = <var>f</var><sub>lowpass</sub>(<var>v</var><sub>1</sub>) + ( <var>v</var><sub>2</sub> &minus; <var>f</var><sub>lowpass</sub>(<var>v</var><sub>2</sub>) )
+    </div>
+
+    <pre class="code-block"><code>def lowpass(x, sigma=16.0):          # provided: at 512 x 512 this is kernel size 265, sigma 16
+    kernel = 2 * round(16.5 * x.shape[-1] / 64) + 1
+    return gaussian_blur(x, [kernel, kernel], [sigma, sigma])
+
+def make_hybrids(noise, condition_a, condition_b, predict_velocity, w=7, step_size=0.02):
+    def joint_velocity(x, t):
+        v_a = cfg_velocity(x, t, condition_a, w, predict_velocity, null_condition=null_condition)
+        v_b = cfg_velocity(x, t, condition_b, w, predict_velocity, null_condition=null_condition)
+        v_a_lowpass, v_b_highpass = lowpass(v_a), v_b - lowpass(v_b)
+        return (v_a_lowpass+v_b_highpass)
+
+    x_final, _ = euler_sample(noise, 0.0, step_size, joint_velocity)
+    return x_final</code></pre>
+
+    <p>
+      Each result is shown at full size (close up) and downsampled to 64&times;64
+      with Lanczos resampling (far away), plus the small version enlarged
+      4&times; so it is easy to inspect.
+    </p>
+
+    <h3 class="subhead">Distant: &ldquo;a tombstone with writing on it&rdquo; &middot; close: &ldquo;a battle scene from above&rdquo; (seed 181)</h3>
+    <div class="hybrid">
+      <figure class="near">
+        <img src="out/parta/3.4%20battle.jpg" alt="A top-down battle scene: dozens of tiny soldiers with spears casting long shadows on pale ground inside an arch-shaped clearing, with a crowd at the bottom, on a dark green surround.">
+        <figcaption>Close: &ldquo;a battle scene from above&rdquo; (512&times;512)</figcaption>
+      </figure>
+      <figure class="far">
+        <img src="out/parta/3.4%20tombstone.jpg" alt="The same image at 64 by 64 pixels: a pale arch-topped tombstone shape covered in tiny dark marks like lines of writing, on a dark green field.">
+        <figcaption>Distant (64&times;64)</figcaption>
+      </figure>
+      <figure class="far zoom">
+        <img src="out/parta/3.4%20tombstone.jpg" alt="The 64 by 64 version enlarged four times, showing a tombstone with rows of small marks.">
+        <figcaption>Distant, enlarged 4&times;</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="subhead">Distant: &ldquo;a face&rdquo; &middot; close: &ldquo;realistic two story house at night&rdquo; (seed 180)</h3>
+    <div class="hybrid">
+      <figure class="near">
+        <img src="out/parta/3.4%20house.jpg" alt="A realistic two-story house at night, lit warm orange from its windows, seen from above at an angle with a flat black roof, floating on a white background.">
+        <figcaption>Close: &ldquo;realistic two story house at night&rdquo; (512&times;512)</figcaption>
+      </figure>
+      <figure class="far">
+        <img src="out/parta/3.4%20face.jpg" alt="The same image at 64 by 64 pixels: still reads mostly as a house, with a dark roof above a warm-lit facade.">
+        <figcaption>Distant (64&times;64)</figcaption>
+      </figure>
+      <figure class="far zoom">
+        <img src="out/parta/3.4%20face.jpg" alt="The 64 by 64 version enlarged four times: a dark block over a warm-lit body.">
+        <figcaption>Distant, enlarged 4&times;</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        The tombstone / battle hybrid works well. Up close it is plainly a
+        top-down battle &mdash; individual soldiers, spears and shadows
+        &mdash; but at 64&times;64 those details merge into rows of tiny
+        marks inside a pale, arch-topped slab on a dark ground, which
+        reads convincingly as a tombstone covered in writing. The face /
+        house hybrid is the weaker of the two: even at 64&times;64 the picture
+        still looks like a house, and the only head-like cue is the
+        black roof reading as hair above a lit &ldquo;face&rdquo;.
+      </p>
+      <p>
+        My read of why: the low-pass filter (<var>&sigma;</var>&nbsp;=&nbsp;16 at 512 px) only passes
+        structure at scales of roughly a hundred pixels or larger. A
+        tombstone is exactly that &mdash; one large, simple silhouette &mdash;
+        so the low-frequency prompt can fully determine it. A face
+        needs eyes, a nose and a mouth at mid-scale, which fall into the
+        <em>high-pass</em> half that belongs to the house prompt, so the
+        house's own structure wins. Choosing a distant subject whose
+        identity lives in its overall silhouette (as the tombstone does) looks
+        like the key to a convincing hybrid.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================================================== PART B ===== -->
+
+  <section class="section part-head" id="part-b">
+    <span class="eyebrow accent">Part B</span>
+    <h2>Flow Matching from Scratch</h2>
+    <p class="section-intro">
+      Part A used someone else's model; here I build and train my own, on
+      MNIST. The path is the one the handout lays out: a one-step denoiser
+      first, to see what a UNet trained with squared error actually learns,
+      then a flow-matching model that turns pure noise into digits by
+      integrating a learned velocity field &mdash; conditioned on time, then on
+      class with classifier-free guidance. Pixels are in [0,&nbsp;1];
+      flow time runs from noise at <var>t</var>&nbsp;=&nbsp;0 to data at <var>t</var>&nbsp;=&nbsp;1, and the network
+      predicts the velocity <var>x</var><sub>1</sub>&nbsp;&minus;&nbsp;<var>x</var><sub>0</sub>, not the noise.
+    </p>
+
+    <div class="table-wrap">
+      <table class="data">
+        <tr><th>Run</th><th>Hidden dim <var>D</var></th><th>Batch</th><th>Epochs (steps)</th><th>Optimizer</th></tr>
+        <tr><td>Denoiser, &sigma;&nbsp;=&nbsp;0.5 (1.2.1)</td><td>128</td><td>256</td><td>5 (1,175)</td><td>Adam, lr 1e-4</td></tr>
+        <tr><td>Denoiser, pure noise (1.2.3)</td><td>128</td><td>256</td><td>5 (1,175)</td><td>Adam, lr 1e-4</td></tr>
+        <tr><td>Time-conditioned flow (2.2)</td><td>64</td><td>64</td><td>10 (9,380)</td><td>Adam, initial lr 1e-4, ExponentialLR &gamma;&nbsp;=&nbsp;0.1<sup>1/10</sup></td></tr>
+        <tr><td>Class-conditioned flow (2.5)</td><td>64</td><td>64</td><td>10 (9,380)</td><td>Adam, initial lr 1e-4, ExponentialLR &gamma;&nbsp;=&nbsp;0.1<sup>1/10</sup></td></tr>
+        <tr><td>Class-conditioned, no scheduler (2.6)</td><td>64</td><td>64</td><td>10 (9,380)</td><td>Adam, constant lr 1e-3</td></tr>
+      </table>
+    </div>
+    <p>
+      All runs use the MNIST training set only (60,000 images), reshuffled
+      every epoch, seed 180, on a Colab T4 (float32 with TF32 matmuls).
+      Noise is drawn fresh for every batch after it comes out of the
+      dataloader, so no epoch ever sees the same noisy image twice.
+    </p>
+  </section>
+
+  <section class="section" id="b-unet">
+    <span class="eyebrow">Part B &middot; 1.1</span>
+    <h2>Implementing the UNet</h2>
+    <p class="section-intro">
+      Two stride-2 convolutions take the 28&times;28 input down to 7&times;7,
+      a 7&times;7 average pool squeezes that to a single 1&times;1 vector,
+      and a mirrored decoder with skip connections brings the resolution back.
+      <var>D</var> is the hidden channel count.
+    </p>
+
+    <ul>
+      <li><strong>Conv</strong> &mdash; 3&times;3 <code>Conv2d</code> (padding 1, no bias) &rarr; <code>BatchNorm2d</code> &rarr; GELU. Changes channels, keeps resolution.</li>
+      <li><strong>DownConv</strong> &mdash; the same with stride 2. Halves the resolution.</li>
+      <li><strong>UpConv</strong> &mdash; 4&times;4 <code>ConvTranspose2d</code> (stride 2, padding 1) &rarr; BN &rarr; GELU. Doubles the resolution.</li>
+      <li><strong>Flatten</strong> &mdash; <code>AvgPool2d(7)</code> &rarr; GELU: 7&times;7 &rarr; 1&times;1.</li>
+      <li><strong>Unflatten</strong> &mdash; 7&times;7 <code>ConvTranspose2d</code> &rarr; BN &rarr; GELU: 1&times;1 &rarr; 7&times;7.</li>
+      <li><strong>ConvBlock / DownBlock / UpBlock</strong> &mdash; Conv&#8728;Conv, DownConv&rarr;Conv and UpConv&rarr;Conv: the same shape change, with extra depth.</li>
+      <li><strong>Concat</strong> &mdash; <code>torch.cat</code> along channels with the matching encoder feature map.</li>
+    </ul>
+
+    <div class="table-wrap">
+      <table class="data">
+        <tr><th>Stage</th><th>Operation</th><th>Output shape</th></tr>
+        <tr><td>input</td><td>noisy image</td><td>1&times;28&times;28</td></tr>
+        <tr><td>init_conv</td><td>ConvBlock (1 &rarr; <var>D</var>)</td><td><var>D</var>&times;28&times;28</td></tr>
+        <tr><td>down1</td><td>DownBlock (<var>D</var> &rarr; <var>D</var>)</td><td><var>D</var>&times;14&times;14</td></tr>
+        <tr><td>down2</td><td>DownBlock (<var>D</var> &rarr; 2<var>D</var>)</td><td>2<var>D</var>&times;7&times;7</td></tr>
+        <tr><td>flatten</td><td>AvgPool(7) &rarr; GELU</td><td>2<var>D</var>&times;1&times;1</td></tr>
+        <tr><td>unflatten</td><td>Unflatten</td><td>2<var>D</var>&times;7&times;7</td></tr>
+        <tr><td>concat with down2</td><td>&mdash;</td><td>4<var>D</var>&times;7&times;7</td></tr>
+        <tr><td>up1</td><td>UpBlock (4<var>D</var> &rarr; <var>D</var>)</td><td><var>D</var>&times;14&times;14</td></tr>
+        <tr><td>concat with down1</td><td>&mdash;</td><td>2<var>D</var>&times;14&times;14</td></tr>
+        <tr><td>up2</td><td>UpBlock (2<var>D</var> &rarr; <var>D</var>)</td><td><var>D</var>&times;28&times;28</td></tr>
+        <tr><td>concat with init_conv</td><td>&mdash;</td><td>2<var>D</var>&times;28&times;28</td></tr>
+        <tr><td>out_conv, proj</td><td>ConvBlock (2<var>D</var> &rarr; <var>D</var>), then 1&times;1 conv</td><td>1&times;28&times;28</td></tr>
+      </table>
+    </div>
+
+    <pre class="code-block"><code>def forward(self, x):
+    x_init  = self.init_conv(x)
+    x_down1 = self.down1(x_init)
+    x_down2 = self.down2(x_down1)
+    x_flat  = self.flatten(x_down2)
+
+    x_up0 = torch.cat((x_down2, self.unflatten(x_flat)), dim=1)
+    x_up1 = torch.cat((x_down1, self.up1(x_up0)), dim=1)
+    x_up2 = torch.cat((x_init,  self.up2(x_up1)), dim=1)
+
+    return self.proj(self.out_conv(x_up2))</code></pre>
+  </section>
+
+  <section class="section" id="b-noising">
+    <span class="eyebrow">Part B &middot; 1.2</span>
+    <h2>The Noising Process</h2>
+    <p class="section-intro">
+      The denoiser is trained on pairs (<var>z</var>, <var>x</var>) where <var>x</var> is a clean digit
+      in [0,&nbsp;1] and <var>z</var> is a noisy copy.
+    </p>
+
+    <div class="equation">
+      <var>z</var> = <var>x</var> + <var>&sigma;&epsilon;</var>, &emsp; <var>&epsilon;</var> ~ <var>N</var>(0, <var>I</var>)
+      &emsp;&emsp; <var>L</var> = <var>E</var> &#8214; <var>D</var><sub><var>&theta;</var></sub>(<var>z</var>) &minus; <var>x</var> &#8214;<sup>2</sup>
+    </div>
+
+    <figure class="feature lg">
+      <img src="out/partb/noise_visualization.jpg" alt="A grid of ten MNIST digits repeated in seven rows with increasing Gaussian noise; the top row is clean and the bottom row is almost unreadable.">
+      <figcaption>The same ten digits at &sigma; = 0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0 (top to bottom). Pixel values are clamped to [0, 1] for display.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Through &sigma;&nbsp;=&nbsp;0.4 every digit is easy to read. At the training level,
+        &sigma;&nbsp;=&nbsp;0.5, strokes are ragged but still legible; by 0.8 only
+        the larger structures survive, and at 1.0 &mdash; where the noise is as
+        strong as the 0&ndash;1 signal itself &mdash; most digits are buried. Since
+        MNIST is a bright stroke on a black background, noise hurts most
+        in the empty regions, where it can mimic a stroke.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-denoise">
+    <span class="eyebrow">Part B &middot; 1.2.1</span>
+    <h2>Training the Denoiser (&sigma; = 0.5)</h2>
+    <p class="section-intro">
+      A <var>D</var>&nbsp;=&nbsp;128 UNet trained for 5 epochs with batch size 256 (235 steps per epoch,
+      1,175 in all) to map <var>z</var>&nbsp;=&nbsp;<var>x</var>&nbsp;+&nbsp;0.5<var>&epsilon;</var> back to <var>x</var>, with an MSE loss. See the
+      table above for the optimizer settings.
+    </p>
+
+    <pre class="code-block"><code>for epoch in range(num_epochs):
+    model.train()
+    for i, (images, _) in enumerate(tqdm(train_loader)):
+        images = images.to(device)
+        noise = torch.randn_like(images).to(device)
+        noisy_images = images + noise_level * noise
+        outputs = model(noisy_images)
+
+        loss = criterion(outputs, images)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        train_losses.append(loss.item())</code></pre>
+
+    <figure class="feature md">
+      <img src="out/partb/U-net%201.2.1%20training_loss.jpg" alt="Training loss over 1,175 optimizer steps, a noisy light-blue trace between about 0.0072 and 0.0088 with an orange moving average sloping gently down from about 0.0083 to 0.0076.">
+      <figcaption>Training loss at every step (light) and its 100-step moving average (orange)</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/partb/sample_denoising_epoch1.jpg" alt="Three rows of ten test digits after epoch 1: the originals, the same digits with noise added, and the denoised result, which is clean though slightly soft, with one thin '1' almost erased.">
+      <figcaption>Test-set results after epoch 1 &mdash; original (top), noisy &sigma; = 0.5 (middle), denoised (bottom)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/partb/sample_denoising_epoch5.jpg" alt="Three rows of ten test digits after epoch 5: the originals, the noisy versions, and denoised digits that are clean and complete.">
+      <figcaption>Test-set results after epoch 5 &mdash; original (top), noisy &sigma; = 0.5 (middle), denoised (bottom)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The smoothed loss drifts down from about 0.0083 to about 0.0076
+        over the 1,175 steps &mdash; a gentle slope. The sample grids tell the
+        same story: after epoch 1 the digits are cleanly recovered but a
+        thin-stroked &ldquo;1&rdquo; (sixth from the left) is almost erased;
+        after epoch 5 every digit is present with continuous strokes. The
+        denoised digits remain slightly softer than the originals, as
+        expected from a squared-error objective: when a stroke edge is
+        ambiguous the best guess in the MSE sense is a blend.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-ood">
+    <span class="eyebrow">Part B &middot; 1.2.2</span>
+    <h2>Out-of-Distribution Testing</h2>
+    <p class="section-intro">
+      The denoiser only ever saw &sigma;&nbsp;=&nbsp;0.5. Here the same ten test digits are
+      noised at other levels and passed through the trained model.
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/partb/OOD%20testing.jpg" alt="Seven rows of ten denoised test digits. The first four rows are clean; row five shows light speckle and thin strokes breaking; rows six and seven are increasingly distorted scribbles.">
+      <figcaption>Denoiser outputs for &sigma; = 0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0 (top to bottom), same digits throughout</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        Below the training level the model is fine: at &sigma;&nbsp;=&nbsp;0.0,
+        0.2 and 0.4 the outputs are as clean as at 0.5 &mdash; a lighter-noise
+        input is simply an easier version of the problem. Above it, quality falls off
+        steadily. At 0.6 faint speckle appears around the digits and thin
+        strokes start to break; at 0.8 several digits are distorted or
+        fragmented (the thin &ldquo;1&rdquo;s fare worst); at 1.0 most outputs
+        are unrecognizable scribbles, though a few keep a hint of the
+        original shape. My interpretation: the network never learns <em>how much</em> noise to
+        remove, only what a typical <em>&sigma;&nbsp;=&nbsp;0.5</em> input
+        needs. Given heavier noise it under-denoises, and residual noise that
+        looks like a stroke gets kept.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-pure">
+    <span class="eyebrow">Part B &middot; 1.2.3</span>
+    <h2>Denoising Pure Noise</h2>
+    <p class="section-intro">
+      To make denoising generative, start from a blank canvas
+      <var>z</var>&nbsp;=&nbsp;<var>&epsilon;</var> and ask for a clean digit. Same model, optimizer and
+      5 epochs as 1.2.1; the only change is that the input is pure Gaussian
+      noise, independent of the target.
+    </p>
+
+    <pre class="code-block"><code>noise = torch.randn_like(images).to(device)
+outputs = model_pure(noise)                    # the input carries no information about `images`
+loss = criterion(outputs, images)</code></pre>
+
+    <figure class="feature md">
+      <img src="out/partb/pure_noise_training_loss.jpg" alt="Training loss for the pure-noise denoiser: it falls from about 0.25 to about 0.07 within the first hundred steps and then stays perfectly flat.">
+      <figcaption>Training loss &mdash; flat at &asymp;&nbsp;0.069 after the first ~150 steps</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/partb/pure_noise_sample_epoch1.jpg" alt="Three rows after epoch 1: ten test digits, ten patches of pure noise, and ten outputs that are all the same blurry, dim, oval blob.">
+      <figcaption>After epoch 1 &mdash; test digits (top), pure-noise inputs (middle), outputs (bottom)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/partb/pure_noise_sample_epoch5.jpg" alt="Three rows after epoch 5: ten test digits, ten patches of pure noise, and ten outputs that are again all the same blurry oval blob, now slightly smoother.">
+      <figcaption>After epoch 5 &mdash; test digits (top), pure-noise inputs (middle), outputs (bottom)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        <strong>What I see.</strong> Every output is the same blurry,
+        vertically elongated blob that looks like a superposition of 0, 3, 6,
+        8 and 9 &mdash; the ten different noise inputs produce ten
+        indistinguishable results, and epoch 5 is just a smoother version of
+        epoch 1. It is not a digit, and there is no diversity at all.
+      </p>
+      <p>
+        <strong>Why.</strong> The input is independent of the target, so
+        the network cannot tell which digit it is &ldquo;supposed&rdquo; to
+        output. With a squared-error loss, the single prediction that
+        minimizes the expected loss when nothing is known is the mean of the
+        targets, <var>E</var>[<var>x</var>]: the pixel-wise average of all 60,000 training
+        digits, i.e. their centroid. The blob is exactly that &mdash; bright where
+        many digits' strokes overlap, dim toward the borders where few do. I checked the
+        numbers: the lowest MSE any constant image can reach on the
+        MNIST training set (its per-pixel variance about the mean image) is
+        0.0673, and the loss plateaus at &asymp;&nbsp;0.069, within my reading error of the plot. So
+        the network has learned precisely the constant best predictor, and it
+        does so within the first couple of hundred steps. Compare the 0.0076 of
+        the &sigma;&nbsp;=&nbsp;0.5 denoiser: there the input <em>does</em> carry information, so the
+        loss can be roughly an order of magnitude lower. This is the same effect as the blurry one-step
+        estimate at <var>t</var>&nbsp;=&nbsp;0.25 in Part A, taken to its limit: at
+        <var>t</var>&nbsp;=&nbsp;0 the input contains no image information at all, and the conditional
+        mean is the prior mean.
+      </p>
+      <p>
+        This is why one-step denoising is not a generative model and why
+        Part 2 moves to flow matching: a sampler must <em>commit</em> to one
+        digit, and it can only do that by taking many small steps that each
+        resolve a little of the ambiguity.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-timecond">
+    <span class="eyebrow">Part B &middot; 2.1</span>
+    <h2>Adding Time Conditioning to the UNet</h2>
+    <p class="section-intro">
+      Now the model learns a flow, <var>u</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>) &asymp; <var>x</var><sub>1</sub> &minus; <var>x</var><sub>0</sub>, with
+      <var>x</var><sub><var>t</var></sub> = (1&nbsp;&minus;&nbsp;<var>t</var>)<var>x</var><sub>0</sub> + <var>t</var><var>x</var><sub>1</sub> and <var>x</var><sub>0</sub> ~ <var>N</var>(0,&nbsp;<var>I</var>). It must be told <var>t</var>, since
+      the right velocity depends on how far along the path the input is. I
+      inject the scalar <var>t</var> (already in [0,&nbsp;1]) through two FCBlocks &mdash; a
+      <code>Linear</code>&rarr;GELU&rarr;<code>Linear</code> MLP &mdash; whose outputs multiply
+      the decoder's features at two points. The network still predicts a
+      flow, not an image: its output contains both the digit to add and the
+      noise to remove.
+    </p>
+
+    <pre class="code-block"><code>class FCBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.lin1 = nn.Linear(in_channels, out_channels)
+        self.gelu = nn.GELU()
+        self.lin2 = nn.Linear(out_channels, out_channels)
+
+    def forward(self, x):
+        return self.lin2(self.gelu(self.lin1(x)))
+
+# in TimeConditionalUNet
+self.fc1_t = FCBlock(1, num_hiddens * 2)       # modulates the unflatten output (2D channels)
+self.fc2_t = FCBlock(1, num_hiddens)           # modulates the up1 output (D channels)
+
+t1 = self.fc1_t(t).unsqueeze(-1).unsqueeze(-1)
+t2 = self.fc2_t(t).unsqueeze(-1).unsqueeze(-1)
+
+unflat_feat = self.unflatten(x_flat) * t1
+x_up0 = torch.cat((x_down2, unflat_feat), dim=1)
+up1_feat = self.up1(x_up0) * t2
+x_up1 = torch.cat((x_down1, up1_feat), dim=1)</code></pre>
+  </section>
+
+  <section class="section" id="b-timetrain">
+    <span class="eyebrow">Part B &middot; 2.2</span>
+    <h2>Training the Time-Conditioned UNet</h2>
+    <p class="section-intro">
+      Each step draws a batch of digits <var>x</var><sub>1</sub>, fresh noise <var>x</var><sub>0</sub>, and one random
+      <var>t</var>&nbsp;~&nbsp;<var>U</var>[0,&nbsp;1] per image; builds <var>x</var><sub><var>t</var></sub>; and regresses the flow with an MSE loss.
+      <var>D</var>&nbsp;=&nbsp;64, batch size 64 (938 steps per epoch, 9,380 in all), 10 epochs, with an
+      exponentially decaying learning rate &mdash; see the table above.
+    </p>
+
+    <div class="equation">
+      <var>L</var> = <var>E</var><sub><var>x</var><sub>0</sub>, <var>x</var><sub>1</sub>, <var>t</var></sub> &#8214; (<var>x</var><sub>1</sub> &minus; <var>x</var><sub>0</sub>) &minus; <var>u</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>) &#8214;<sup>2</sup>,
+      &emsp; <var>t</var> ~ <var>U</var>[0, 1]
+    </div>
+
+    <pre class="code-block"><code>def time_fm_forward(unet, x_1, num_ts):
+    unet.train()
+    N = x_1.shape[0]
+    t = torch.rand(N, device=device)
+    x_0 = torch.randn_like(x_1)
+
+    t_expanded = t.view(N, 1, 1, 1)
+    x_t = (1.0 - t_expanded) * x_0 + t_expanded * x_1
+    v_target = x_1 - x_0
+    v_pred = unet(x_t, t)
+
+    return F.mse_loss(v_pred, v_target)</code></pre>
+
+    <figure class="feature md">
+      <img src="out/partb/2.2%20training_loss.jpg" alt="Training loss of the time-conditioned UNet over 9,380 steps: a sharp drop from about 1.7 to about 0.2 in the first few hundred steps, then a slow decline to about 0.12.">
+      <figcaption>Time-conditioned UNet &mdash; training loss (light) and 100-step moving average (orange)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The loss falls from above 1.5 on the first step to below about 0.25
+        within a few hundred steps, then creeps down to roughly 0.12 (smoothed) by
+        the end. It never gets near the 0.0076 of the denoiser, and it is
+        not supposed to: the target <var>x</var><sub>1</sub>&nbsp;&minus;&nbsp;<var>x</var><sub>0</sub> contains pure noise, and from
+        <var>x</var><sub><var>t</var></sub> alone the model can only partly pin down which noise was drawn.
+        The floor of this loss reflects irreducible uncertainty, not a
+        training failure.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-timesample">
+    <span class="eyebrow">Part B &middot; 2.3</span>
+    <h2>Sampling from the Time-Conditioned UNet</h2>
+    <p class="section-intro">
+      Sampling starts from pure Gaussian noise at <var>t</var>&nbsp;=&nbsp;0 and follows the learned
+      flow with 50 Euler steps, <var>x</var><sub><var>t</var>+&Delta;<var>t</var></sub> = <var>x</var><sub><var>t</var></sub> + &Delta;<var>t</var>&thinsp;<var>u</var><sub><var>&theta;</var></sub>(<var>x</var><sub><var>t</var></sub>, <var>t</var>),
+      &Delta;<var>t</var>&nbsp;=&nbsp;1/50, then clamps to [0,&nbsp;1]. Each grid is 100 samples
+      generated from the <em>same</em> 100 initial noises (seed 180) using the epoch-1, epoch-5 and
+      epoch-10 checkpoints, so corresponding cells are directly comparable.
+    </p>
+
+    <pre class="code-block"><code>@torch.inference_mode()
+def time_fm_sample(unet, img_wh, num_ts, seed=0):
+    unet.eval()
+    N = 100
+    g = torch.Generator(device=device).manual_seed(seed)
+    x_t = torch.randn(N, 1, *img_wh, device=device, generator=g)
+    dt = 1.0 / num_ts
+
+    for i in range(num_ts):
+        t = i * dt
+        t_batch = torch.full((N,), t, device=device)
+        v_pred = unet(x_t, t_batch)
+        x_t = x_t + v_pred * dt
+
+    return x_t.clamp(0.0, 1.0)</code></pre>
+
+    <div class="compare">
+      <figure>
+        <img src="out/partb/2.3%20epoch%201.jpg" alt="A 10 by 10 grid of samples after epoch 1: mostly scribbles and stroke fragments, almost none recognizable as digits.">
+        <figcaption>After epoch 1</figcaption>
+      </figure>
+      <figure>
+        <img src="out/partb/2.3%20epoch%205.jpg" alt="A 10 by 10 grid of samples after epoch 5: many recognizable digits such as 7, 9, 0, 6 and 2, mixed with malformed ones.">
+        <figcaption>After epoch 5</figcaption>
+      </figure>
+    </div>
+    <figure class="feature">
+      <img src="out/partb/2.3%20epoch%2010.jpg" alt="A 10 by 10 grid of samples after epoch 10: a similar mix to epoch 5 with slightly cleaner strokes; many digits legible, some still malformed.">
+      <figcaption>After epoch 10</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        After epoch 1 the samples already have MNIST's texture &mdash; thick,
+        pen-like strokes on a clean black background &mdash; but only a
+        handful read as digits. By epoch 5 a good fraction are legible (7s, 9s, 0s, 6s,
+        2s, 4s), and epoch 10 sharpens strokes further without changing most
+        samples: the same noise ends up as the same digit, so (for example)
+        the third sample in the top row goes from a hook-like scribble to a clean
+        7 at epoch 5 and stays a 7. The results are decent but clearly
+        imperfect: a sizable share are malformed, half-way shapes between two
+        digits. That is the expected weakness of an <em>unconditional</em>
+        model, which must decide on a digit implicitly, early in the flow,
+        from the noise alone &mdash; and in the ambiguous regions between digits
+        its average velocity points somewhere in between.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-classcond">
+    <span class="eyebrow">Part B &middot; 2.4</span>
+    <h2>Adding Class Conditioning to the UNet</h2>
+    <p class="section-intro">
+      To get both better samples and control over <em>which</em> digit comes
+      out, the UNet is additionally conditioned on the class. Two more FCBlocks
+      embed a one-hot class vector <var>c</var>, and the modulation becomes
+      scale-and-shift: the class scales the features and time shifts them.
+    </p>
+
+    <pre class="code-block"><code>self.fc1_t = FCBlock(1, num_hiddens * 2)
+self.fc1_c = FCBlock(num_classes + 1, num_hiddens * 2)
+self.fc2_t = FCBlock(1, num_hiddens)
+self.fc2_c = FCBlock(num_classes + 1, num_hiddens)
+
+unflat_modulated = c1 * unflat_feat + t1
+x_up0 = torch.cat((x_down2, unflat_modulated), dim=1)
+up1_modulated = c2 * up1_feat + t2
+x_up1 = torch.cat((x_down1, up1_modulated), dim=1)</code></pre>
+
+    <p>
+      To keep the model usable without a class (which classifier-free
+      guidance needs), the label is dropped 10% of the time
+      (<var>p</var><sub>uncond</sub>&nbsp;=&nbsp;0.1) during training. I implement &ldquo;dropped&rdquo; with
+      a dedicated eleventh one-hot slot &mdash; a &ldquo;null class&rdquo; &mdash;
+      rather than an all-zeros vector, which is why the class FCBlocks take
+      <code>num_classes + 1</code> = 11 inputs. It plays the same role as
+      zeroing the vector: a fixed, learned &ldquo;no label&rdquo; signal.
+    </p>
+
+    <pre class="code-block"><code>c_idx = c.clone()
+if mask is not None:
+    c_idx[mask == 0] = self.num_classes          # index 10 = "no label"
+c_onehot = F.one_hot(c_idx, num_classes=self.num_classes + 1).float()</code></pre>
+  </section>
+
+  <section class="section" id="b-classtrain">
+    <span class="eyebrow">Part B &middot; 2.5</span>
+    <h2>Training the Class-Conditioned UNet</h2>
+    <p class="section-intro">
+      Training is identical to 2.2, with two differences: the batch's
+      digit labels are passed in as <var>c</var>, and with probability 0.1 each
+      label is replaced by the null class.
+    </p>
+
+    <pre class="code-block"><code>def class_fm_forward(unet, x_1, c, p_uncond, num_ts):
+    unet.train()
+    N = x_1.shape[0]
+    t = torch.rand(N, device=x_1.device)
+    x_0 = torch.randn_like(x_1)
+
+    t_expanded = t.view(N, 1, 1, 1)
+    x_t = (1.0 - t_expanded) * x_0 + t_expanded * x_1
+    v_target = x_1 - x_0
+
+    mask = (torch.rand(N, device=x_1.device) &gt; p_uncond).long()   # mask == 0 means: drop the label
+    v_pred = unet(x_t, c, t, mask=mask)
+
+    return F.mse_loss(v_pred, v_target)</code></pre>
+
+    <figure class="feature md">
+      <img src="out/partb/2.5%20training_loss.jpg" alt="Training loss of the class-conditioned UNet over 9,380 steps: a sharp drop from about 1.4 to about 0.2, then a slow decline to about 0.10.">
+      <figcaption>Class-conditioned UNet &mdash; training loss (light) and 100-step moving average (orange)</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The curve has the same shape as the time-only model but settles lower
+        &mdash; about 0.10 versus 0.12 (smoothed values read off the plots) &mdash;
+        because the label removes part of the uncertainty about where the
+        flow is headed.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="b-classsample">
+    <span class="eyebrow">Part B &middot; 2.6</span>
+    <h2>Sampling with Classifier-Free Guidance</h2>
+    <p class="section-intro">
+      Sampling runs the flow twice per step &mdash; once with the class
+      and once with the null class &mdash; and extrapolates from the
+      unconditional prediction toward the conditional one with
+      &gamma;&nbsp;=&nbsp;5. (Note this is a different convention from Part A's
+      <var>v</var><sub><var>c</var></sub>&nbsp;+&nbsp;<var>w</var>(<var>v</var><sub><var>c</var></sub>&nbsp;&minus;&nbsp;<var>v</var><sub><var>u</var></sub>): here the
+      <em>unconditional</em> output is the base, so &gamma;&nbsp;=&nbsp;1 is plain
+      conditional sampling and Part A's <var>w</var> corresponds to &gamma;&nbsp;&minus;&nbsp;1.) 300 Euler steps.
+    </p>
+
+    <div class="equation">
+      <var>u</var> = <var>u</var><sub>uncond</sub> + <var>&gamma;</var>&thinsp;( <var>u</var><sub>cond</sub> &minus; <var>u</var><sub>uncond</sub> ),
+      &emsp; <var>&gamma;</var> = 5
+    </div>
+
+    <pre class="code-block"><code>@torch.inference_mode()
+def class_fm_sample(unet, c, img_wh, num_ts, guidance_scale=5.0, seed=0):
+    unet.eval()
+    N = c.shape[0]
+    x_t = torch.randn(N, 1, img_wh[0], img_wh[1], device=c.device)
+    dt = 1.0 / num_ts
+
+    for i in range(num_ts):
+        t_batch = torch.full((N,), i * dt, device=c.device)
+
+        v_cond   = unet(x_t, c, t_batch, mask=torch.ones(N, device=c.device))
+        v_uncond = unet(x_t, c, t_batch, mask=torch.zeros(N, device=c.device))
+
+        v_pred = v_uncond + guidance_scale * (v_cond - v_uncond)
+        x_t = x_t + v_pred * dt
+
+    return x_t.clamp(0.0, 1.0)</code></pre>
+
+    <p>
+      Each grid has four independent samples of every digit: columns are
+      the digits 0&ndash;9 and each row is a separate draw of noise.
+    </p>
+
+    <div class="compare">
+      <figure>
+        <img src="out/partb/2.6%20epoch%201.jpg" alt="A grid of class-conditioned samples after epoch 1: four rows by ten columns for digits 0 to 9. All are identifiable, though several 4s, 5s and 9s are malformed.">
+        <figcaption>After epoch 1</figcaption>
+      </figure>
+      <figure>
+        <img src="out/partb/2.6%20epoch%205.jpg" alt="A grid of class-conditioned samples after epoch 5: four clean, legible examples of each digit 0 to 9.">
+        <figcaption>After epoch 5</figcaption>
+      </figure>
+    </div>
+    <figure class="feature lg">
+      <img src="out/partb/2.6%20epoch%2010.jpg" alt="A grid of class-conditioned samples after epoch 10: four crisp, varied handwritten examples of each digit 0 to 9.">
+      <figcaption>After epoch 10 &mdash; four samples of each digit 0&ndash;9 (columns), &gamma; = 5, 300 steps</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The difference from 2.3 is dramatic. Already after one epoch the label
+        is obeyed &mdash; each column is clearly the requested digit for most
+        samples &mdash; though several 4s, 5s and 9s are malformed. By epoch 5 all forty samples are clean and
+        legible, and by epoch 10 the strokes are crisper, with a little more
+        variation in slant and thickness within each class. The label
+        removes the model's need to decide <em>what</em> to draw, and
+        guidance sharpens the result. One fair caveat on the comparison:
+        this model also samples with 300 steps instead of 50, so the improvement
+        bundles class conditioning, guidance and finer integration rather
+        than isolating any one of them.
+      </p>
+    </div>
+
+    <h3 class="subhead">Getting rid of the learning-rate scheduler</h3>
+    <p>
+      Can I drop <code>ExponentialLR</code> and keep the same quality? Yes.
+      What I did to compensate: I trained a fresh, otherwise identical
+      model &mdash; same <var>D</var>&nbsp;=&nbsp;64 architecture, batch size 64, 10 epochs,
+      <var>p</var><sub>uncond</sub>&nbsp;=&nbsp;0.1, same 300-step &gamma;&nbsp;=&nbsp;5 sampler &mdash; with Adam at a
+      single <strong>constant learning rate of 1e-3</strong>.
+    </p>
+
+    <pre class="code-block"><code>optimizer_nosched = torch.optim.Adam(fm_nosched.parameters(), lr=1e-3)   # no scheduler.step()</code></pre>
+
+    <div class="compare">
+      <figure>
+        <img src="out/partb/2.6%20epoch%2010.jpg" alt="Class-conditioned samples after epoch 10, trained with the exponential learning-rate scheduler.">
+        <figcaption>Epoch 10, with the scheduler</figcaption>
+      </figure>
+      <figure>
+        <img src="out/partb/2.6%20epoch%2010%20nosched.jpg" alt="Class-conditioned samples after epoch 10, trained with a constant learning rate and no scheduler; four clean digits of each class, comparable to the scheduled model.">
+        <figcaption>Epoch 10, no scheduler (constant lr 1e-3)</figcaption>
+      </figure>
+    </div>
+
+    <div class="compare">
+      <figure>
+        <img src="out/partb/2.5%20training_loss.jpg" alt="Training loss with the scheduler, settling near 0.10.">
+        <figcaption>Training loss, with scheduler</figcaption>
+      </figure>
+      <figure>
+        <img src="out/partb/2.5%20training_loss_nosched.jpg" alt="Training loss without the scheduler, settling near 0.09.">
+        <figcaption>Training loss, constant lr</figcaption>
+      </figure>
+    </div>
+
+    <div class="reflection">
+      <p>
+        The no-scheduler samples are just as good as the scheduled ones:
+        all 40 are clean, correctly labeled digits (if anything marginally
+        crisper), and the training loss ends slightly lower, about 0.09 versus
+        0.10. The scheduler's job is to take large steps early and small
+        steps late, shrinking the effective noise in the updates as the
+        model converges. Without it there is no late-stage annealing, so the
+        constant rate has to do both jobs: it must be small enough to settle
+        into a good minimum yet large enough to learn quickly in only ten
+        epochs. I did not sweep this value &mdash; 1e-3 was my one choice, and
+        Adam's per-parameter step normalization plus BatchNorm make this
+        UNet fairly forgiving of it.
+      </p>
+      <p>
+        Two caveats keep this from being a clean test of &ldquo;schedule
+        versus no schedule.&rdquo; Each variant is a single run judged on one
+        40-image grid and a noisy loss curve, so small differences are not
+        meaningful. And the two learning-rate ranges differ: the scheduled
+        run goes from 1e-4 down to about 1.3e-5, so the constant 1e-3 is ten
+        times its starting rate. What the experiment does show is that, for
+        this problem and training length, a single well-chosen constant
+        learning rate can replace the decay schedule without hurting sample
+        quality.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="takeaway">
+    <span class="eyebrow">Reflection</span>
+    <h2>The Most Important Thing I Learned</h2>
+    <p>
+      A flow model is just a velocity field, and nearly everything in this
+      project is a different way of choosing where to start integrating,
+      what to condition on, or how to combine velocities before an Euler
+      step: editing is starting partway along the path, guidance is
+      extrapolating between two velocities, and anagrams and hybrids are
+      averaging them or splitting them by frequency. The other lesson is that
+      a network trained with squared error predicts an <em>average</em> &mdash;
+      which is exactly why the one-step estimates in Part A and the
+      pure-noise denoiser in Part B are blurry, and why taking many small
+      steps, and conditioning on a class or a prompt, is what turns that
+      average into an actual sample.
+    </p>
+    <p class="fallback-link">
+      Part A uses the pretrained PixNerd-XXL-P16-T2I model
+      (<code>MCG-NJU/PixNerd-XXL-P16-T2I</code>). The visual-anagram method follows
+      <em>Visual Anagrams: Generating Multi-View Optical Illusions with Diffusion Models</em>
+      (<a href="https://arxiv.org/abs/2311.17919" target="_blank" rel="noopener">arXiv:2311.17919</a>),
+      and the hybrid-image method follows <em>Factorized Diffusion</em>. Project handout
+      and starter notebooks by the CS&nbsp;180 staff:
+      <a href="https://cal-cs180.github.io/fa26/hw/proj3-flow" target="_blank" rel="noopener">Fun with Flow Models</a>.
+    </p>
+  </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <a href="../index.html">&larr; Back to portfolio</a>
+  </footer>
+
+</body>
+</html>
