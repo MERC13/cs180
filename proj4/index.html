@@ -296,33 +296,33 @@ rgb = (1-dx)*(1-dy)*im[y0, x0] + dx*(1-dy)*im[y0, x0+1] + (1-dx)*dy*im[y0+1, x0]
       the near edge, so the left of the rectified image is magnified more and looks softer than the right.
     </p>
 
-    <h3>Example 2 &mdash; the wall kiosk</h3>
+    <h3>Example 2 &mdash; the lecture slide</h3>
     <p>
-      A second flat rectangle from the same photo: the front plate of the small kiosk mounted on the same
-      wall, to the right of the display. It is a different object in a different place, but it occupies only
-      about 135&times;110 pixels of the photo, so it is a useful stress test of the interpolation.
+      A second flat rectangle, from a different photo: the slide projected onto the screen in a lecture hall,
+      photographed at an angle. The slide is the bright rectangle inside the gray screen, and its four
+      corners are the ones picked below.
     </p>
     <figure class="feature sm">
-      <img src="out/a3_kiosk_orig.jpg" alt="A close view of the kiosk on the wooden wall with its four picked corners marked and joined by a dashed yellow quadrilateral.">
+      <img src="out/a3_lecture_orig.jpg" alt="The lecture-hall screen showing a slide titled RANSAC, with the slide's four corners marked and joined by a dashed yellow quadrilateral; seen from the side, the slide is a skewed trapezoid.">
       <figcaption>Original (cropped), with the four picked corners</figcaption>
     </figure>
     <div class="compare">
       <figure>
-        <img src="out/a3_kiosk_nn.png" alt="The kiosk front plate warped to a rectangle with nearest-neighbor sampling; the pixels are visibly blocky.">
+        <img src="out/a3_lecture_nn.png" alt="The slide warped to a 4:3 rectangle with nearest-neighbor sampling: the title RANSAC and the two hallway photos are now square-on.">
         <figcaption>Nearest neighbor, 1000&times;800</figcaption>
       </figure>
       <figure>
-        <img src="out/a3_kiosk_bilinear.png" alt="The same rectified kiosk with bilinear sampling: smooth, soft edges.">
+        <img src="out/a3_lecture_bilinear.png" alt="The same rectified slide with bilinear sampling: edges and lettering are smooth.">
         <figcaption>Bilinear</figcaption>
       </figure>
     </div>
 
     <p>
-      The target is an 800&times;600 rectangle (a 4:3 guess) with a 100-pixel margin. The edges of the plate
-      and of the screen bezel come out straight and parallel, which is the check that the corners were
-      picked accurately.
+      The target is an 800&times;600 rectangle (a 4:3 guess, the usual shape of a slide) with a 100-pixel margin
+      that shows some of the screen around it. The slide&rsquo;s edges come out straight and its lettering and
+      photos have natural proportions, which is the check that the corners were picked accurately.
     </p>
-<div class="equation matrix-eq"><span><var>H</var> =</span><table class="matrix"><tr><td>21.51</td><td>&minus;1.609</td><td>&minus;1.199&times;10<sup>4</sup></td></tr><tr><td>&minus;1.102</td><td>16.41</td><td>&minus;9543</td></tr><tr><td>0.004468</td><td>&minus;0.001128</td><td>1</td></tr></table></div>
+<div class="equation matrix-eq"><span><var>H</var> =</span><table class="matrix"><tr><td>1.633</td><td>0</td><td>&minus;568.1</td></tr><tr><td>&minus;0.3632</td><td>1.571</td><td>&minus;547.6</td></tr><tr><td>&minus;0.0004949</td><td>0.0001611</td><td>1</td></tr></table></div>
 
     <h3 class="subhead">Nearest neighbor vs. bilinear</h3>
     <figure class="feature lg">
@@ -331,8 +331,8 @@ rgb = (1-dx)*(1-dy)*im[y0, x0] + dx*(1-dy)*im[y0, x0+1] + (1-dx)*dy*im[y0+1, x0]
     </figure>
 
     <figure class="feature lg">
-      <img src="out/a3_kiosk_zoom.png" alt="A close-up of the kiosk screen after rectification. Nearest neighbor shows visible blocks; bilinear is smooth.">
-      <figcaption>Detail of the rectified kiosk. Left: nearest neighbor. Right: bilinear.</figcaption>
+      <img src="out/a3_lecture_zoom.png" alt="A close-up of the title RANSAC and the rule under it on the rectified slide. Nearest neighbor gives a jagged, stair-stepped rule and rough letter edges; bilinear is smooth.">
+      <figcaption>Detail of the rectified slide title. Left: nearest neighbor. Right: bilinear.</figcaption>
     </figure>
 
 
@@ -340,7 +340,7 @@ rgb = (1-dx)*(1-dy)*im[y0, x0] + dx*(1-dy)*im[y0, x0+1] + (1-dx)*dy*im[y0+1, x0]
       <table class="data">
         <tr><th>Example</th><th>Output size</th><th>Nearest neighbor</th><th>Bilinear</th><th>Bilinear / NN</th></tr>
         <tr><td>Wall display</td><td>1400&times;900</td><td>161&nbsp;ms</td><td>465&nbsp;ms</td><td>2.9&times;</td></tr>
-        <tr><td>Wall kiosk</td><td>1000&times;800</td><td>101&nbsp;ms</td><td>286&nbsp;ms</td><td>2.8&times;</td></tr>
+        <tr><td>Lecture slide</td><td>1000&times;800</td><td>102&nbsp;ms</td><td>288&nbsp;ms</td><td>2.8&times;</td></tr>
       </table>
     </div>
 
@@ -355,8 +355,8 @@ rgb = (1-dx)*(1-dy)*im[y0, x0] + dx*(1-dy)*im[y0, x0+1] + (1-dx)*dy*im[y0+1, x0]
       <p>
         <strong>Quality.</strong> Nearest neighbor keeps every pixel exactly as photographed, but because
         each output pixel snaps to a source pixel, straight edges turn into staircases and thin strokes
-        break up &mdash; the digits in &ldquo;12:12&rdquo; are jagged, and the kiosk, which is enlarged roughly
-        sixfold, turns into visible blocks. Bilinear averages neighboring pixels, so edges are smooth and
+        break up &mdash; the digits in &ldquo;12:12&rdquo; are jagged, and the thin rule under &ldquo;RANSAC&rdquo; on
+        the lecture slide breaks into a stair-step. Bilinear averages neighboring pixels, so edges are smooth and
         there is no blockiness, at the price of slight softening, since it can never create detail that
         was not in the photo. The more a region is magnified, the more bilinear wins; when the warp is close to a
         pure shift or a mild shrink, the two are nearly indistinguishable and nearest neighbor&rsquo;s
@@ -448,15 +448,6 @@ result = low_blend + np.choose(winner[..., None], highs)</code></pre>
       </p>
     </div>
 
-    <h3 class="subhead">Where the correspondences come from</h3>
-    <p>
-      The mosaic correspondences were found automatically rather than clicked: SIFT features were matched between
-      each pair of neighboring frames, the matches were filtered down to those consistent with a single homography
-      (RANSAC), and nine well-localized matches spread across the overlap (seven for gateway_top) were kept and
-      passed to <code>computeH</code> unchanged. Against all of the surviving matches, each recovered homography predicts
-      positions to within about a pixel on average. The correspondences for each mosaic are shown under it.
-    </p>
-
     <h3 class="subhead">Mosaic 1 &mdash; Outer courtyard</h3>
     <p>Three frames panned left to right, registered into the middle frame.</p>
     <div class="gallery">
@@ -482,28 +473,6 @@ result = low_blend + np.choose(winner[..., None], highs)</code></pre>
     <div class="reflection">
       <p>The three frames merge without a visible seam, including across the glass facades, whose regular grid of panes would make any misregistration obvious. The tree and the bench are closer to the camera than the distant building, so a small shift of the hand-held camera between frames moves them more; that is where the choice of blending matters, as the comparison above shows.</p>
     </div>
-
-    <details class="more">
-      <summary>Correspondences and recovered homographies for this mosaic</summary>
-    <figure class="feature lg">
-      <img src="out/a4_outer_l_corr.jpg" alt="outer_left next to outer_mid, each with 9 numbered red points on matching features.">
-      <figcaption>outer_left &rarr; outer_mid (9 correspondences)</figcaption>
-    </figure>
-    <figure class="feature lg">
-      <img src="out/a4_outer_r_corr.jpg" alt="outer_right next to outer_mid, each with 9 numbered red points on matching features.">
-      <figcaption>outer_right &rarr; outer_mid (9 correspondences)</figcaption>
-    </figure>
-
-      <pre class="code-block"><code>H  (outer_left -> outer_mid) =
-  [      1.3213    -0.015134      -287.29 ]
-  [     0.23534       1.2036      -110.53 ]
-  [  0.00042583   3.4405e-06            1 ]
-
-H  (outer_right -> outer_mid) =
-  [     0.67998      0.02574       273.33 ]
-  [    -0.25554      0.86006       86.169 ]
-  [ -0.00039721  -4.2018e-05            1 ]</code></pre>
-    </details>
 
     <h3 class="subhead">Mosaic 2 &mdash; Inner atrium</h3>
     <p>Another pan, indoors, with a strongly tilted view up into the atrium.</p>
@@ -531,28 +500,6 @@ H  (outer_right -> outer_mid) =
       <p>The railing is the hardest part of this scene to align, since it is a row of thin vertical bars: any residual error would show up as a doubled or broken bar. At full size no bar is doubled or broken where the frames overlap. The camera was tilted up, so the outer frames are warped noticeably more than in the courtyard set, which shows in the slanted outline of the mosaic.</p>
     </div>
 
-    <details class="more">
-      <summary>Correspondences and recovered homographies for this mosaic</summary>
-    <figure class="feature lg">
-      <img src="out/a4_inner_l_corr.jpg" alt="inner_left next to inner_mid, each with 9 numbered red points on matching features.">
-      <figcaption>inner_left &rarr; inner_mid (9 correspondences)</figcaption>
-    </figure>
-    <figure class="feature lg">
-      <img src="out/a4_inner_r_corr.jpg" alt="inner_right next to inner_mid, each with 9 numbered red points on matching features.">
-      <figcaption>inner_right &rarr; inner_mid (9 correspondences)</figcaption>
-    </figure>
-
-      <pre class="code-block"><code>H  (inner_left -> inner_mid) =
-  [      1.3805    -0.054026      -329.95 ]
-  [     0.31151       1.2484      -152.89 ]
-  [  0.00049931  -8.1108e-07            1 ]
-
-H  (inner_right -> inner_mid) =
-  [     0.66253     0.090008       278.24 ]
-  [    -0.31581      0.88906       67.659 ]
-  [ -0.00043503  -6.3436e-06            1 ]</code></pre>
-    </details>
-
     <h3 class="subhead">Mosaic 3 &mdash; Gateway</h3>
     <p>A vertical sweep rather than a pan: three frames tilted up the front of the building.</p>
     <div class="gallery">
@@ -579,29 +526,7 @@ H  (inner_right -> inner_mid) =
       <p>The sign across the facade is the check here: its lettering is crisp, with no doubled strokes, even though it lies in the overlap of the middle and top frames. The middle frame alone cuts the sign off at its right edge; the mosaic restores it. The hourglass outline comes from the geometry &mdash; the top and bottom frames are tilted away from the reference, so their warped outlines fan out around the narrower middle frame.</p>
     </div>
 
-    <details class="more">
-      <summary>Correspondences and recovered homographies for this mosaic</summary>
-    <figure class="feature lg">
-      <img src="out/a4_gateway_b_corr.jpg" alt="gateway_bottom next to gateway_middle, each with 9 numbered red points on matching features.">
-      <figcaption>gateway_bottom &rarr; gateway_middle (9 correspondences)</figcaption>
-    </figure>
-    <figure class="feature lg">
-      <img src="out/a4_gateway_t_corr.jpg" alt="gateway_top next to gateway_middle, each with 7 numbered red points on matching features.">
-      <figcaption>gateway_top &rarr; gateway_middle (7 correspondences)</figcaption>
-    </figure>
-
-      <pre class="code-block"><code>H  (gateway_bottom -> gateway_middle) =
-  [     0.86221      -0.1426       58.502 ]
-  [   0.0031353      0.63171       309.21 ]
-  [  3.7771e-06  -0.00036451            1 ]
-
-H  (gateway_top -> gateway_middle) =
-  [      1.4069      0.25468      -150.42 ]
-  [   -0.010958       1.6564       -530.3 ]
-  [ -1.8038e-05   0.00064738            1 ]</code></pre>
-    </details>
-
-    <div class="reflection">
+    <div class="reflection takeaway">
       <p>
         <strong>What I took away.</strong> Warping is mechanical once <var>H</var> is right, and <var>H</var> is only
         as good as the correspondences: a few pixels of error is invisible at the points themselves and

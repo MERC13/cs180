@@ -508,28 +508,6 @@ table.matrix td {
   line-height: 1.6;
 }
 
-/* Collapsible per-pair detail (correspondences + homographies) under each mosaic */
-details.more {
-  margin: 0 0 var(--space-3);
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-1);
-}
-
-details.more summary {
-  cursor: pointer;
-  padding: var(--space-1) 0;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-details.more summary:hover {
-  color: var(--color-accent);
-}
-
-details.more[open] summary {
-  margin-bottom: var(--space-2);
-}
-
 /* Ordered procedure steps */
 ol.steps {
   max-width: 65ch;
@@ -542,5 +520,10 @@ ol.steps li {
 }
 
 .reflection + .fallback-link {
+  margin-top: var(--space-3);
+}
+
+/* Closing takeaway that follows another reflection box */
+.reflection.takeaway {
   margin-top: var(--space-3);
 }
