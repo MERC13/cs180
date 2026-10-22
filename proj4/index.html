@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project 4 &mdash; Image Warping and Mosaicing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="site-name" href="../index.html">Jonah Cha</a>
+    <nav class="site-nav">
+      <a href="../index.html">&larr; Portfolio</a>
+    </nav>
+  </header>
+
+  <main>
+
+  <section class="hero">
+    <span class="eyebrow accent">Project 4</span>
+    <h1>Image Warping and Mosaicing</h1>
+    <p class="intro">
+      Part A. Photos taken by rotating the camera are related by homographies, so a handful of
+      point correspondences is enough to line them up. This part recovers those homographies by least
+      squares, writes two inverse warps from scratch (nearest neighbor and bilinear), rectifies flat
+      objects photographed at an angle, and stitches three sets of photos into blended mosaics.
+    </p>
+    <div class="meta">
+      <span class="eyebrow">CS 180 &middot; Fall 2026</span>
+      <span class="eyebrow">Part A</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow accent">Part A</span>
+    <a href="#a-shoot">A.1 Shoot the Pictures</a>
+    <a href="#a-homography">A.2 Recover Homographies</a>
+    <a href="#a-warp">A.3 Warp &amp; Rectify</a>
+    <a href="#a-mosaic">A.4 Mosaics</a>
+  </nav>
+
+  <section class="section" id="a-shoot">
+    <span class="eyebrow">Part A &middot; A.1</span>
+    <h2>Shoot the Pictures</h2>
+    <p class="section-intro">
+      Three sets of photos, each shot from a single standpoint while rotating the
+      camera between frames &mdash; a pan for the outer courtyard and the inner
+      atrium, a tilt for the gateway. With a fixed center of projection, two frames of
+      the same scene differ only by a projective transformation (a homography), no
+      matter how the scene is arranged in depth, so one 3&times;3 matrix per frame is
+      enough to register them. The middle frame of each set is the reference that the
+      other two are warped into.
+    </p>
+
+    <h3>Outer courtyard &mdash; pan</h3>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/outer_left.jpg" alt="Left frame of the outer courtyard: a glass office building, a pruned plane tree in the middle and a wet wooden bench in the foreground.">
+        <figcaption>outer_left</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/outer_mid.jpg" alt="Middle frame of the outer courtyard: the same tree and bench, with the building's glass wall curving away to the right.">
+        <figcaption>outer_mid (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/outer_right.jpg" alt="Right frame of the outer courtyard: the curved glass building across a lawn, the tree at the far left and the bench at lower left.">
+        <figcaption>outer_right</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="subhead">Inner atrium &mdash; pan</h3>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/inner_left.jpg" alt="Left frame of the inner atrium: curved white balconies rising to a skylight, with a wood-paneled wall and a railing below.">
+        <figcaption>inner_left</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/inner_mid.jpg" alt="Middle frame of the inner atrium: the skylight overhead, stacked white balconies and the circular railing at the bottom.">
+        <figcaption>inner_mid (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/inner_right.jpg" alt="Right frame of the inner atrium: balconies and the skylight at upper left, wood paneling and the railing below.">
+        <figcaption>inner_right</figcaption>
+      </figure>
+    </div>
+
+    <h3 class="subhead">Gateway &mdash; tilt</h3>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/gateway_bottom.jpg" alt="Bottom frame of the gateway: the underside of a curved building above a paved plaza, with a view down a street.">
+        <figcaption>gateway_bottom</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/gateway_middle.jpg" alt="Middle frame of the gateway: the lettered sign on the curved facade above the open entrance.">
+        <figcaption>gateway_middle (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/gateway_top.jpg" alt="Top frame of the gateway: the upper floors of the curved glass facade, with the lettered sign across the middle.">
+        <figcaption>gateway_top</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="a-homography">
+    <span class="eyebrow">Part A &middot; A.2</span>
+    <h2>Recover Homographies</h2>
+    <p class="section-intro">
+      A homography maps a point (<var>x</var>,&nbsp;<var>y</var>) in one image to
+      (<var>x</var>&prime;,&nbsp;<var>y</var>&prime;) in another using homogeneous
+      coordinates, and is defined only up to scale &mdash; so fixing the bottom-right
+      entry to 1 leaves eight unknowns.
+    </p>
+
+    <div class="equation">
+      <span class="eyebrow">Model</span><br>
+      (<var>w</var><var>x</var>&prime;, <var>w</var><var>y</var>&prime;, <var>w</var>)<sup>T</sup> = <var>H</var> (<var>x</var>, <var>y</var>, 1)<sup>T</sup>,
+      &emsp; <var>H</var> = [ <var>a</var> <var>b</var> <var>c</var> ; <var>d</var> <var>e</var> <var>f</var> ; <var>g</var> <var>h</var> 1 ]
+      <br>
+      <var>x</var>&prime; = (<var>ax</var> + <var>by</var> + <var>c</var>) / (<var>gx</var> + <var>hy</var> + 1),
+      &emsp; <var>y</var>&prime; = (<var>dx</var> + <var>ey</var> + <var>f</var>) / (<var>gx</var> + <var>hy</var> + 1)
+    </div>
+
+    <p>
+      Multiplying out the denominators makes both equations linear in the unknowns, so
+      every correspondence contributes two rows:
+    </p>
+
+    <div class="equation matrix-eq">
+      <table class="matrix">
+        <tr><td><var>x</var></td><td><var>y</var></td><td>1</td><td>0</td><td>0</td><td>0</td><td>&minus;<var>xx</var>&prime;</td><td>&minus;<var>yx</var>&prime;</td></tr>
+        <tr><td>0</td><td>0</td><td>0</td><td><var>x</var></td><td><var>y</var></td><td>1</td><td>&minus;<var>xy</var>&prime;</td><td>&minus;<var>yy</var>&prime;</td></tr>
+      </table>
+      <table class="matrix">
+        <tr><td><var>a</var></td></tr><tr><td><var>b</var></td></tr><tr><td><var>c</var></td></tr><tr><td><var>d</var></td></tr>
+        <tr><td><var>e</var></td></tr><tr><td><var>f</var></td></tr><tr><td><var>g</var></td></tr><tr><td><var>h</var></td></tr>
+      </table>
+      <span>=</span>
+      <table class="matrix">
+        <tr><td><var>x</var>&prime;</td></tr><tr><td><var>y</var>&prime;</td></tr>
+      </table>
+    </div>
+
+    <p>
+      Stacking <var>n</var> correspondences gives <var>A</var><var>h</var>&nbsp;=&nbsp;<var>b</var>, with
+      <var>A</var> of size 2<var>n</var>&times;8. Four points determine <var>H</var> exactly; with more, the
+      system is overdetermined and <code>computeH</code> solves it in the least-squares sense,
+      which averages out the small errors in each picked point.
+    </p>
+
+    <pre class="code-block"><code>def computeH(im1_pts, im2_pts):
+    A, b = [], []
+    for (x, y), (xp, yp) in zip(im1_pts, im2_pts):
+        A.append([x, y, 1, 0, 0, 0, -x*xp, -y*xp]); b.append(xp)
+        A.append([0, 0, 0, x, y, 1, -x*yp, -y*yp]); b.append(yp)
+    h, _, _, _ = np.linalg.lstsq(np.array(A), np.array(b))
+    return np.append(h, 1).reshape(3, 3)</code></pre>
+
+    <h3 class="subhead">Worked example: outer_left &rarr; outer_mid</h3>
+    <p>
+      Six correspondences on distinct structural features: a building corner, points along the base
+      of the building and its entrance canopy, and two corners of the second bench. Point <var>i</var> in the left image is paired with
+      point <var>i</var> in the middle image.
+    </p>
+
+    <figure class="feature lg">
+      <img src="out/a2_correspondences.jpg" alt="The outer_left and outer_mid photos side by side with six numbered red points on matching features: a building corner, points along the building base and entrance canopy, and two corners of the second bench.">
+      <figcaption>The six correspondences, numbered. Left: points <var>P</var> in outer_left. Right: the matching points <var>P</var>&prime; in outer_mid.</figcaption>
+    </figure>
+
+    <p>
+      Six pairs give 12 equations for 8 unknowns. The full system, with the right-hand
+      side <var>b</var> on the right (the rows alternate between the <var>x</var>&prime; and
+      <var>y</var>&prime; equation of each correspondence):
+    </p>
+
+    <pre class="code-block"><code>    x    y   1   0   0   0    -x·x′    -y·x′   |    b
+-----------------------------------------------------
+  243   94   1   0   0   0    -7533    -2914   |   31
+    0    0   0 243  94   1   -14094    -5452   |   58
+
+  229  569   1   0   0   0    -1374    -3414   |    6
+    0    0   0 229 569   1  -130301  -323761   |  569
+
+  584  571   1   0   0   0  -222504  -217551   |  381
+    0    0   0 584 571   1  -334632  -327183   |  573
+
+  740  571   1   0   0   0  -383320  -295778   |  518
+    0    0   0 740 571   1  -422540  -326041   |  571
+
+  724  777   1   0   0   0  -362724  -389277   |  501
+    0    0   0 724 777   1  -550964  -591297   |  761
+
+  608  771   1   0   0   0  -243200  -308400   |  400
+    0    0   0 608 771   1  -462688  -586731   |  761</code></pre>
+
+    <p>
+      Solving it with least squares gives <var>h</var> = (1.311, &minus;0.01958, &minus;282.4, 0.24, 1.183, &minus;105.8, 0.0004174, &minus;4.363&times;10<sup>&minus;6</sup>), i.e. the recovered homography:
+    </p>
+
+<div class="equation matrix-eq"><span><var>H</var> =</span><table class="matrix"><tr><td>1.3112</td><td>&minus;0.019576</td><td>&minus;282.43</td></tr><tr><td>0.23997</td><td>1.1832</td><td>&minus;105.83</td></tr><tr><td>0.00041735</td><td>&minus;4.3628&times;10<sup>&minus;6</sup></td><td>1</td></tr></table></div>
+    <p>
+      As a check, pushing each left-image point through <var>H</var> lands within
+      1.24&nbsp;px of its partner in the middle image, with a mean of
+      0.80&nbsp;px (per-point errors: 0.24, 0.38, 1.24, 1.09, 1.13, 0.73).
+      The residual of the linear system is &#8214;<var>Ah</var>&nbsp;&minus;&nbsp;<var>b</var>&#8214;&nbsp;=&nbsp;2.76.
+    </p>
+
+    <div class="reflection">
+      <p>
+        The nonzero bottom-row entries, <var>g</var>&nbsp;&asymp;&nbsp;0.000417 and
+        <var>h</var>&nbsp;&asymp;&nbsp;&minus;4.36&times;10<sup>&minus;6</sup>, are what make this projective rather than
+        affine: they make the scale factor <var>w</var> = <var>gx</var> + <var>hy</var> + 1 change across the image
+        (here by about 32% from the left edge to the right edge), which is the
+        foreshortening you see when the camera turns. The least-squares fit is only checked where the points
+        are; away from them it extrapolates, and in my tests a pixel or two of difference in the points moved the far
+        corners of a warped frame by ten pixels or more. That is why spreading the points across the overlap
+        matters as much as how many there are.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-warp">
+    <span class="eyebrow">Part A &middot; A.3</span>
+    <h2>Warp the Images</h2>
+    <p class="section-intro">
+      Both warps use inverse warping. Pushing source pixels forward through <var>H</var> would leave
+      holes and overlaps in the output, so instead every output pixel
+      <var>p</var>&prime; is pulled back through <var>H</var><sup>&minus;1</sup> to a source location
+      <var>p</var>, which is generally not an integer, and the source image is sampled there. The
+      output canvas is found by pushing the four image corners through <var>H</var> and taking their
+      bounding box. Output pixels whose source location falls outside the image keep
+      alpha&nbsp;=&nbsp;0, so the result is an RGBA image and &ldquo;no data&rdquo; is never confused with
+      black.
+    </p>
+
+    <div class="table-wrap">
+      <table class="data">
+        <tr><th>Method</th><th>What it does at <var>p</var> = (<var>x</var>, <var>y</var>)</th></tr>
+        <tr><td><code>warpImageNearestNeighbor</code></td><td>Rounds <var>p</var> to the closest pixel and copies it.</td></tr>
+        <tr><td><code>warpImageBilinear</code></td><td>Blends the four surrounding pixels, weighted by distance: with <var>dx</var>, <var>dy</var> the fractional parts, the weights are (1&minus;<var>dx</var>)(1&minus;<var>dy</var>), <var>dx</var>(1&minus;<var>dy</var>), (1&minus;<var>dx</var>)<var>dy</var> and <var>dx</var><var>dy</var>.</td></tr>
+      </table>
+    </div>
+
+    <pre class="code-block"><code># core of warpImageBilinear (simplified)
+p_src = p_out @ H_inv.T                       # every output pixel, pulled back through H^-1
+x_src, y_src = p_src[..., 0] / p_src[..., 2], p_src[..., 1] / p_src[..., 2]
+x0, y0 = np.floor(x_src).astype(int), np.floor(y_src).astype(int)   # top-left neighbor
+dx, dy = x_src - x0, y_src - y0
+rgb = (1-dx)*(1-dy)*im[y0, x0] + dx*(1-dy)*im[y0, x0+1] + (1-dx)*dy*im[y0+1, x0] + dx*dy*im[y0+1, x0+1]</code></pre>
+
+    <h3 class="subhead">Rectification</h3>
+    <p>
+      To test the warps I rectified two flat rectangles that were photographed at an angle: the
+      four corners of each object were picked in the photo and mapped to the corners of an
+      axis-aligned rectangle, so that <var>H</var> is the homography that makes the object
+      fronto-parallel. The target sizes below are my guess at each object&rsquo;s proportions; a wrong
+      guess stretches the result but does not change how straight the edges are.
+    </p>
+    <p>
+      One practical problem: the default canvas is useless here. The wall&rsquo;s vanishing line sits just
+      left of this photo, so the corner (0,&nbsp;0) lands near (&minus;26,900,&nbsp;&minus;16,900) and the bounding box of
+      the whole warped image would be roughly 28,000&times;23,000 pixels. Both warp functions therefore
+      take an optional <code>bounds</code> argument, and for rectification I only render the target
+      rectangle plus a margin.
+    </p>
+
+    <h3>Example 1 &mdash; the wall display</h3>
+    <figure class="feature sm">
+      <img src="out/a3_display_orig.jpg" alt="The hallway photo with the four picked corners of the large wall display marked and joined by a dashed yellow quadrilateral.">
+      <figcaption>Original, with the four picked corners</figcaption>
+    </figure>
+    <div class="compare">
+      <figure>
+        <img src="out/a3_display_nn.png" alt="The display warped to a rectangle with nearest-neighbor sampling: the screen is now a straight-edged rectangle with the wooden wall around it.">
+        <figcaption>Nearest neighbor, 1400&times;900</figcaption>
+      </figure>
+      <figure>
+        <img src="out/a3_display_bilinear.png" alt="The same rectified display with bilinear sampling: edges and text are smoother.">
+        <figcaption>Bilinear</figcaption>
+      </figure>
+    </div>
+
+    <p>
+      The corners map to a 1000&times;500 rectangle (a 2:1 guess), on a canvas with a 200-pixel margin
+      so the wall around the screen is visible. The recovered homography is
+    </p>
+<div class="equation matrix-eq"><span><var>H</var> =</span><table class="matrix"><tr><td>110.9</td><td>1.465</td><td>&minus;2.692&times;10<sup>4</sup></td></tr><tr><td>15.48</td><td>30.44</td><td>&minus;1.691&times;10<sup>4</sup></td></tr><tr><td>0.05104</td><td>0.00118</td><td>1</td></tr></table></div>
+    <p>
+      The bottom-row entry <var>g</var>&nbsp;&asymp;&nbsp;0.051 is large because the wall
+      is seen at a steep angle: the scale factor <var>w</var> changes by a factor of about 40 between the left and right edges of
+      the photo. The display&rsquo;s far (left) edge is only about 230 pixels tall in the photo versus about 420 for
+      the near edge, so the left of the rectified image is magnified more and looks softer than the right.
+    </p>
+
+    <h3>Example 2 &mdash; the wall kiosk</h3>
+    <p>
+      A second flat rectangle from the same photo: the front plate of the small kiosk mounted on the same
+      wall, to the right of the display. It is a different object in a different place, but it occupies only
+      about 135&times;110 pixels of the photo, so it is a useful stress test of the interpolation.
+    </p>
+    <figure class="feature sm">
+      <img src="out/a3_kiosk_orig.jpg" alt="A close view of the kiosk on the wooden wall with its four picked corners marked and joined by a dashed yellow quadrilateral.">
+      <figcaption>Original (cropped), with the four picked corners</figcaption>
+    </figure>
+    <div class="compare">
+      <figure>
+        <img src="out/a3_kiosk_nn.png" alt="The kiosk front plate warped to a rectangle with nearest-neighbor sampling; the pixels are visibly blocky.">
+        <figcaption>Nearest neighbor, 1000&times;800</figcaption>
+      </figure>
+      <figure>
+        <img src="out/a3_kiosk_bilinear.png" alt="The same rectified kiosk with bilinear sampling: smooth, soft edges.">
+        <figcaption>Bilinear</figcaption>
+      </figure>
+    </div>
+
+    <p>
+      The target is an 800&times;600 rectangle (a 4:3 guess) with a 100-pixel margin. The edges of the plate
+      and of the screen bezel come out straight and parallel, which is the check that the corners were
+      picked accurately.
+    </p>
+<div class="equation matrix-eq"><span><var>H</var> =</span><table class="matrix"><tr><td>21.51</td><td>&minus;1.609</td><td>&minus;1.199&times;10<sup>4</sup></td></tr><tr><td>&minus;1.102</td><td>16.41</td><td>&minus;9543</td></tr><tr><td>0.004468</td><td>&minus;0.001128</td><td>1</td></tr></table></div>
+
+    <h3 class="subhead">Nearest neighbor vs. bilinear</h3>
+    <figure class="feature lg">
+      <img src="out/a3_display_zoom.png" alt="A close-up of the time text 12:12 PM on the rectified display. Nearest neighbor shows jagged, blocky glyphs; bilinear shows smooth but slightly soft glyphs.">
+      <figcaption>Detail of the rectified display, magnified without further smoothing. Left: nearest neighbor. Right: bilinear.</figcaption>
+    </figure>
+
+    <figure class="feature lg">
+      <img src="out/a3_kiosk_zoom.png" alt="A close-up of the kiosk screen after rectification. Nearest neighbor shows visible blocks; bilinear is smooth.">
+      <figcaption>Detail of the rectified kiosk. Left: nearest neighbor. Right: bilinear.</figcaption>
+    </figure>
+
+
+    <div class="table-wrap">
+      <table class="data">
+        <tr><th>Example</th><th>Output size</th><th>Nearest neighbor</th><th>Bilinear</th><th>Bilinear / NN</th></tr>
+        <tr><td>Wall display</td><td>1400&times;900</td><td>161&nbsp;ms</td><td>465&nbsp;ms</td><td>2.9&times;</td></tr>
+        <tr><td>Wall kiosk</td><td>1000&times;800</td><td>101&nbsp;ms</td><td>286&nbsp;ms</td><td>2.8&times;</td></tr>
+      </table>
+    </div>
+
+    <div class="reflection">
+      <p>
+        <strong>Speed.</strong> Nearest neighbor does one lookup per output pixel. Bilinear does four lookups,
+        computes four weights and sums them, so it takes roughly three times as long
+        (2.9&times; and 2.8&times; here; median of five runs of the vectorized NumPy
+        implementation on one laptop). Neither is slow at this size, but the gap would matter for a
+        large panorama or a video.
+      </p>
+      <p>
+        <strong>Quality.</strong> Nearest neighbor keeps every pixel exactly as photographed, but because
+        each output pixel snaps to a source pixel, straight edges turn into staircases and thin strokes
+        break up &mdash; the digits in &ldquo;12:12&rdquo; are jagged, and the kiosk, which is enlarged roughly
+        sixfold, turns into visible blocks. Bilinear averages neighboring pixels, so edges are smooth and
+        there is no blockiness, at the price of slight softening, since it can never create detail that
+        was not in the photo. The more a region is magnified, the more bilinear wins; when the warp is close to a
+        pure shift or a mild shrink, the two are nearly indistinguishable and nearest neighbor&rsquo;s
+        speed is hard to argue with. I use bilinear everywhere in the mosaics, where the quality gain
+        is worth the cost.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="a-mosaic">
+    <span class="eyebrow">Part A &middot; A.4</span>
+    <h2>Blend the Images into a Mosaic</h2>
+    <p class="section-intro">
+      Warping puts every frame in the same coordinates, but laying one frame over another would leave a hard
+      edge wherever they meet, because neighboring photos never match perfectly: they differ a little in exposure and in alignment. The procedure
+      below avoids that with weighted averaging, and then fixes the ghosting that averaging alone leaves behind.
+    </p>
+
+    <ol class="steps">
+      <li><strong>Pick a reference.</strong> The middle frame of each set. Every other frame gets a homography
+        into it from <code>computeH</code>, so only two homographies are estimated per mosaic.</li>
+      <li><strong>Size the canvas.</strong> Push the corners of every frame through its homography and take the
+        bounding box of all of them.</li>
+      <li><strong>Warp.</strong> Inverse-warp each frame into that canvas with the bilinear warp. Alongside the
+        image, warp a <em>feathering weight</em> that is 1 at the center of the original frame and falls linearly to 0 at its edge.</li>
+      <li><strong>Blend.</strong> Average the warped frames per pixel, weighted by their feathering weights.
+        Weights are largest where a frame is best covered, so one frame fades into the next across the
+        overlap instead of ending at a hard edge.</li>
+    </ol>
+
+    <div class="equation">
+      <var>w</var>(<var>u</var>, <var>v</var>) = 1 &minus; max(|<var>u</var>|, |<var>v</var>|),
+      &emsp; <var>u</var>, <var>v</var> &isin; [&minus;1, 1] across the frame
+      <br>
+      <var>I</var>(<var>p</var>) = &sum;<sub><var>i</var></sub> <var>w</var><sub><var>i</var></sub>(<var>p</var>)&thinsp;<var>I</var><sub><var>i</var></sub>(<var>p</var>) / &sum;<sub><var>i</var></sub> <var>w</var><sub><var>i</var></sub>(<var>p</var>)
+    </div>
+
+    <figure class="feature lg">
+      <img src="out/a4_outer_layers.jpg" alt="A grid of six panels. Top row: the outer left, middle and right frames warped into the shared canvas on black. Bottom row: their feathering weights as bright-center, dark-edge gradients with the same warped outlines.">
+      <figcaption>Outer set, after warping. Top: the three frames in the shared canvas. Bottom: each frame&rsquo;s feathering weight (white is 1, black is 0 or no data).</figcaption>
+    </figure>
+
+    <h3 class="subhead">Weighted averaging is not quite enough</h3>
+    <p>
+      Averaging removes the hard seam, but anything that the homography cannot align &mdash; small errors in
+      <var>H</var>, or nearby objects when a hand-held camera moves slightly between shots &mdash; is averaged with
+      itself shifted by a few pixels, which shows up as ghosting. I therefore use a two-level
+      pyramid. Each warped frame is split into a low-frequency band (a Gaussian blur with
+      <var>&sigma;</var>&nbsp;=&nbsp;8, computed only over pixels the frame covers so that the black outside does
+      not leak in) and a high-frequency band (the residual). The low band, which carries the exposure and
+      color differences, is averaged with the feathering weights as before. The high band, which carries the
+      edges and texture, is taken from whichever frame has the largest weight at that pixel, so it is never
+      averaged with a shifted copy of itself.
+    </p>
+
+    <div class="equation">
+      <var>L</var><sub><var>i</var></sub> = (<var>G</var><sub><var>&sigma;</var></sub> &lowast; <var>I</var><sub><var>i</var></sub><var>m</var><sub><var>i</var></sub>) / (<var>G</var><sub><var>&sigma;</var></sub> &lowast; <var>m</var><sub><var>i</var></sub>),
+      &emsp; <var>D</var><sub><var>i</var></sub> = (<var>I</var><sub><var>i</var></sub> &minus; <var>L</var><sub><var>i</var></sub>)&thinsp;<var>m</var><sub><var>i</var></sub>
+      <br>
+      <var>I</var> = &sum;<sub><var>i</var></sub> <var>w</var><sub><var>i</var></sub> <var>L</var><sub><var>i</var></sub> / &sum;<sub><var>i</var></sub> <var>w</var><sub><var>i</var></sub> &nbsp;+&nbsp; <var>D</var><sub><var>i</var>*</sub>,
+      &emsp; <var>i</var>* = argmax<sub><var>i</var></sub> <var>w</var><sub><var>i</var></sub>
+    </div>
+
+    <pre class="code-block"><code># 2-band blend, simplified from create_mosaic
+low = gaussian_filter(rgb * mask, (sigma, sigma, 0)) / gaussian_filter(mask, (sigma, sigma, 0))
+high = (rgb - low) * mask                                  # per frame
+
+low_blend = (low_stack * w_stack).sum(0) / w_stack.sum(0)  # feathered average of the low bands
+winner = np.argmax(w_stack, axis=0)                        # highest-weight frame per pixel
+result = low_blend + np.choose(winner[..., None], highs)</code></pre>
+
+    <figure class="feature lg">
+      <img src="out/a4_blend_compare.jpg" alt="Two rows of three crops of the outer mosaic. Top row, a building corner: pasting frames over each other shows a hard vertical seam; weighted averaging and the 2-band blend both hide it. Bottom row, the tree: weighted averaging doubles leaves and twigs; pasting and the 2-band blend show one crisp tree.">
+      <figcaption>Outer set, three ways of combining the same warped frames. Top: a facade crop where the frames meet. Bottom: the tree crown.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>
+        The top row shows why plain pasting fails: wherever one frame takes over from the next, the two disagree
+        a little, and pasting turns that disagreement into an edge. Here the left and middle frames have the same
+        average brightness over their overlap (within one gray level), but the facade&rsquo;s roofline and window
+        frames visibly shift where the middle frame starts; between the middle and right frames there is also a
+        real exposure difference, the right frame being about 7 gray levels darker. Weighted averaging and the
+        2-band blend both hide the join. The bottom row shows what averaging alone cannot fix: the tree is closer to the camera
+        than the building, and the camera moved slightly between frames, so the left and middle frames disagree
+        about where each leaf is, even though the distant building lines up. Averaged, every leaf is doubled and the
+        crown turns soft. In the 2-band
+        result the colors still blend smoothly, but each twig comes from a single frame and stays sharp.
+      </p>
+    </div>
+
+    <h3 class="subhead">Where the correspondences come from</h3>
+    <p>
+      The mosaic correspondences were found automatically rather than clicked: SIFT features were matched between
+      each pair of neighboring frames, the matches were filtered down to those consistent with a single homography
+      (RANSAC), and nine well-localized matches spread across the overlap (seven for gateway_top) were kept and
+      passed to <code>computeH</code> unchanged. Against all of the surviving matches, each recovered homography predicts
+      positions to within about a pixel on average. The correspondences for each mosaic are shown under it.
+    </p>
+
+    <h3 class="subhead">Mosaic 1 &mdash; Outer courtyard</h3>
+    <p>Three frames panned left to right, registered into the middle frame.</p>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/outer_left.jpg" alt="Left frame of the outer courtyard: a glass office building, a pruned plane tree in the middle and a wet wooden bench in the foreground.">
+        <figcaption>outer_left</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/outer_mid.jpg" alt="Middle frame of the outer courtyard: the same tree and bench, with the building's glass wall curving away to the right.">
+        <figcaption>outer_mid (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/outer_right.jpg" alt="Right frame of the outer courtyard: the curved glass building across a lawn, the tree at the far left and the bench at lower left.">
+        <figcaption>outer_right</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature lg">
+      <img src="out/a4_outer_mosaic.jpg" alt="The blended outer courtyard mosaic: the glass building curving from left to right around a lawn, the tree in the middle and the wooden bench in the foreground, with no visible seams.">
+      <figcaption>The outer mosaic, 1563&times;1342 pixels. The black areas are where no frame has data.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>The three frames merge without a visible seam, including across the glass facades, whose regular grid of panes would make any misregistration obvious. The tree and the bench are closer to the camera than the distant building, so a small shift of the hand-held camera between frames moves them more; that is where the choice of blending matters, as the comparison above shows.</p>
+    </div>
+
+    <details class="more">
+      <summary>Correspondences and recovered homographies for this mosaic</summary>
+    <figure class="feature lg">
+      <img src="out/a4_outer_l_corr.jpg" alt="outer_left next to outer_mid, each with 9 numbered red points on matching features.">
+      <figcaption>outer_left &rarr; outer_mid (9 correspondences)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/a4_outer_r_corr.jpg" alt="outer_right next to outer_mid, each with 9 numbered red points on matching features.">
+      <figcaption>outer_right &rarr; outer_mid (9 correspondences)</figcaption>
+    </figure>
+
+      <pre class="code-block"><code>H  (outer_left -> outer_mid) =
+  [      1.3213    -0.015134      -287.29 ]
+  [     0.23534       1.2036      -110.53 ]
+  [  0.00042583   3.4405e-06            1 ]
+
+H  (outer_right -> outer_mid) =
+  [     0.67998      0.02574       273.33 ]
+  [    -0.25554      0.86006       86.169 ]
+  [ -0.00039721  -4.2018e-05            1 ]</code></pre>
+    </details>
+
+    <h3 class="subhead">Mosaic 2 &mdash; Inner atrium</h3>
+    <p>Another pan, indoors, with a strongly tilted view up into the atrium.</p>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/inner_left.jpg" alt="Left frame of the inner atrium: curved white balconies rising to a skylight, with a wood-paneled wall and a railing below.">
+        <figcaption>inner_left</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/inner_mid.jpg" alt="Middle frame of the inner atrium: the skylight overhead, stacked white balconies and the circular railing at the bottom.">
+        <figcaption>inner_mid (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/inner_right.jpg" alt="Right frame of the inner atrium: balconies and the skylight at upper left, wood paneling and the railing below.">
+        <figcaption>inner_right</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature lg">
+      <img src="out/a4_inner_mosaic.jpg" alt="The blended inner atrium mosaic: stacked curved white balconies around a skylight, a wood-paneled wall and a circular railing along the bottom.">
+      <figcaption>The inner mosaic, 1720&times;1390 pixels. The black areas are where no frame has data.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>The railing is the hardest part of this scene to align, since it is a row of thin vertical bars: any residual error would show up as a doubled or broken bar. At full size no bar is doubled or broken where the frames overlap. The camera was tilted up, so the outer frames are warped noticeably more than in the courtyard set, which shows in the slanted outline of the mosaic.</p>
+    </div>
+
+    <details class="more">
+      <summary>Correspondences and recovered homographies for this mosaic</summary>
+    <figure class="feature lg">
+      <img src="out/a4_inner_l_corr.jpg" alt="inner_left next to inner_mid, each with 9 numbered red points on matching features.">
+      <figcaption>inner_left &rarr; inner_mid (9 correspondences)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/a4_inner_r_corr.jpg" alt="inner_right next to inner_mid, each with 9 numbered red points on matching features.">
+      <figcaption>inner_right &rarr; inner_mid (9 correspondences)</figcaption>
+    </figure>
+
+      <pre class="code-block"><code>H  (inner_left -> inner_mid) =
+  [      1.3805    -0.054026      -329.95 ]
+  [     0.31151       1.2484      -152.89 ]
+  [  0.00049931  -8.1108e-07            1 ]
+
+H  (inner_right -> inner_mid) =
+  [     0.66253     0.090008       278.24 ]
+  [    -0.31581      0.88906       67.659 ]
+  [ -0.00043503  -6.3436e-06            1 ]</code></pre>
+    </details>
+
+    <h3 class="subhead">Mosaic 3 &mdash; Gateway</h3>
+    <p>A vertical sweep rather than a pan: three frames tilted up the front of the building.</p>
+    <div class="gallery">
+      <figure>
+        <img src="out/src/gateway_bottom.jpg" alt="Bottom frame of the gateway: the underside of a curved building above a paved plaza, with a view down a street.">
+        <figcaption>gateway_bottom</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/gateway_middle.jpg" alt="Middle frame of the gateway: the lettered sign on the curved facade above the open entrance.">
+        <figcaption>gateway_middle (reference)</figcaption>
+      </figure>
+      <figure>
+        <img src="out/src/gateway_top.jpg" alt="Top frame of the gateway: the upper floors of the curved glass facade, with the lettered sign across the middle.">
+        <figcaption>gateway_top</figcaption>
+      </figure>
+    </div>
+
+    <figure class="feature md">
+      <img src="out/a4_gateway_mosaic.jpg" alt="The blended gateway mosaic: the paved plaza and entrance at the bottom, the curved glass facade with a lettered sign above, and the upper floors at the top, in one tall image with an hourglass-shaped outline.">
+      <figcaption>The gateway mosaic, 1095&times;2073 pixels. The black areas are where no frame has data.</figcaption>
+    </figure>
+
+    <div class="reflection">
+      <p>The sign across the facade is the check here: its lettering is crisp, with no doubled strokes, even though it lies in the overlap of the middle and top frames. The middle frame alone cuts the sign off at its right edge; the mosaic restores it. The hourglass outline comes from the geometry &mdash; the top and bottom frames are tilted away from the reference, so their warped outlines fan out around the narrower middle frame.</p>
+    </div>
+
+    <details class="more">
+      <summary>Correspondences and recovered homographies for this mosaic</summary>
+    <figure class="feature lg">
+      <img src="out/a4_gateway_b_corr.jpg" alt="gateway_bottom next to gateway_middle, each with 9 numbered red points on matching features.">
+      <figcaption>gateway_bottom &rarr; gateway_middle (9 correspondences)</figcaption>
+    </figure>
+    <figure class="feature lg">
+      <img src="out/a4_gateway_t_corr.jpg" alt="gateway_top next to gateway_middle, each with 7 numbered red points on matching features.">
+      <figcaption>gateway_top &rarr; gateway_middle (7 correspondences)</figcaption>
+    </figure>
+
+      <pre class="code-block"><code>H  (gateway_bottom -> gateway_middle) =
+  [     0.86221      -0.1426       58.502 ]
+  [   0.0031353      0.63171       309.21 ]
+  [  3.7771e-06  -0.00036451            1 ]
+
+H  (gateway_top -> gateway_middle) =
+  [      1.4069      0.25468      -150.42 ]
+  [   -0.010958       1.6564       -530.3 ]
+  [ -1.8038e-05   0.00064738            1 ]</code></pre>
+    </details>
+
+    <div class="reflection">
+      <p>
+        <strong>What I took away.</strong> Warping is mechanical once <var>H</var> is right, and <var>H</var> is only
+        as good as the correspondences: a few pixels of error is invisible at the points themselves and
+        obvious at the far corners of a frame. The projective model is also strictly a statement about rotating
+        the camera about its center, so whatever is close to the camera is where a hand-held shot breaks it &mdash; the tree
+        and the bench here &mdash; and blending is what hides that. Planar mosaics also stretch quickly as frames rotate away
+        from the reference, so they cannot span 180&deg; or more; all three sets stay well below that.
+      </p>
+    </div>
+    <p class="fallback-link">
+      Project handout and starter notes by the CS&nbsp;180 staff:
+      <a href="https://cal-cs180.github.io/fa26/hw/proj3/partA.html" target="_blank" rel="noopener">Image Warping and Mosaicing, Part A</a>.
+    </p>
+  </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <a href="../index.html">&larr; Back to portfolio</a>
+  </footer>
+
+</body>
+</html>
